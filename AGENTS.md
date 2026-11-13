@@ -40,6 +40,16 @@ Start with `README.md` and `docs/ARCHITECTURE.md`.
   runtime are bundled.
 - Comments say why, not what. No placeholders or TODOs in committed code.
 
+## Authorship
+
+The repository owner, GitHub user `smafnan`, is the only author and contributor.
+
+- Commit as the owner. Before the first commit of a session run
+  `git config user.name smafnan` and
+  `git config user.email 97063361+smafnan@users.noreply.github.com`.
+- Never add a `Co-Authored-By:` trailer that names an AI assistant, in commits or in
+  pull request descriptions.
+
 ## Commands
 
 ```
