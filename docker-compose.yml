@@ -7,8 +7,10 @@ services:
     # Behind a proxy, also set PUBLIC_ORIGIN (e.g. https://tarjuman.example.com) in .env.
     ports:
       - '127.0.0.1:8787:8787'
+    # .env is optional here: without it, ACCESS_TOKEN below fails with a plain message.
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       HOST: 0.0.0.0
       # Fixed inside the container, whatever .env says; change the published port above instead.

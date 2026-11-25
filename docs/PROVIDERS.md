@@ -8,6 +8,10 @@ They change often and some are not published at all, so Tarjuman does not rely o
 numbers: it reacts to what the provider answers (rate-limit responses, retry hints) and
 moves on. `npm run doctor` shows the truth for your account.
 
+Tarjuman also keeps to a per-minute budget of its own for most providers (the "Own budget"
+column below), so that it stops asking before the provider answers "too many requests". When
+a provider has used its budget it is skipped until the minute is over.
+
 ## Keys
 
 | Key                     | Where to get it                                                       | Unlocks                                                              |
@@ -17,15 +21,23 @@ moves on. `npm run doctor` shows the truth for your account.
 | `AZURE_SPEECH_KEY`      | Azure portal → Speech resource (free F0 tier; needs an Azure account) | Official neural voices                                               |
 | `OPENAI_COMPAT_API_KEY` | your provider                                                         | Any OpenAI-compatible chat endpoint as an extra translator           |
 
+You need at least one of the Groq and Gemini keys to recognize speech. Gemini alone is
+enough; Groq adds fast German and English recognition and a fallback for Urdu.
+
 Keys can be set in `.env` or pasted in the app (Settings → API keys). The environment wins.
+Keys pasted in the app are saved in `data/keys.json`, which is restricted to your own
+account: by file mode 0600 on Linux and macOS, by an access-control list on Windows.
 
 ## Speech recognition
 
-| Id                            | Service · model                  | Free tier (approx.)                           | Notes                                                                                           |
-| ----------------------------- | -------------------------------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `gemini-audio`                | Google · `gemini-3.5-flash-lite` | ~10–15 requests/min, ~500/day, unpublished    | Hears the audio and returns transcript **and** translations in one call. First choice for Urdu. |
-| `groq-whisper-large-v3`       | Groq · `whisper-large-v3`        | 20 requests/min, 2,000/day, 2 h of audio/hour | First choice for German and English.                                                            |
-| `groq-whisper-large-v3-turbo` | Groq · `whisper-large-v3-turbo`  | same, separate bucket                         | Overflow.                                                                                       |
+| Id                            | Service · model                  | Free tier (approx.)                           | Own budget    | Notes                                                                                           |
+| ----------------------------- | -------------------------------- | --------------------------------------------- | ------------- | ----------------------------------------------------------------------------------------------- |
+| `gemini-audio`                | Google · `gemini-3.5-flash-lite` | ~10–15 requests/min, ~500/day, unpublished    | 8 per minute  | Hears the audio and returns transcript **and** translations in one call. First choice for Urdu. |
+| `groq-whisper-large-v3`       | Groq · `whisper-large-v3`        | 20 requests/min, 2,000/day, 2 h of audio/hour | 18 per minute | First choice for German and English.                                                            |
+| `groq-whisper-large-v3-turbo` | Groq · `whisper-large-v3-turbo`  | same, separate bucket                         | 18 per minute | Overflow.                                                                                       |
+
+Fast, continuous Urdu can use more than the 8 requests a minute that Tarjuman allows itself
+for `gemini-audio`. It then falls back to Whisper for the rest of that minute.
 
 Whisper's published word error rate is about 5 % for German and about 20 % for Urdu,
 rising sharply when English terms are mixed in. That is why Urdu goes to Gemini when a key
@@ -34,26 +46,30 @@ Urdu from coming back as Hindi in Devanagari script.
 
 ## Translation
 
-| Id                  | Service · model                  | Free tier (approx.)                          | Notes                                                                |
-| ------------------- | -------------------------------- | -------------------------------------------- | -------------------------------------------------------------------- |
-| `gemini-flash-lite` | Google · `gemini-3.5-flash-lite` | shared with `gemini-audio`                   | Strongest evidence for Urdu quality.                                 |
-| `gemma`             | Google · `gemma-4-31b-it`        | ~15 requests/min, ~1,500/day, unpublished    | Same key, separate quota.                                            |
-| `groq-gpt-oss-120b` | Groq · `openai/gpt-oss-120b`     | 30 requests/min, 1,000/day, 8,000 tokens/min | Fast. Urdu quality is unproven.                                      |
-| `groq-qwen3-8-27b`  | Groq · `qwen/qwen3.8-27b`        | same, separate bucket                        |                                                                      |
-| `groq-gpt-oss-20b`  | Groq · `openai/gpt-oss-20b`      | same, separate bucket                        |                                                                      |
-| `custom`            | whatever you configure           | —                                            | `OPENAI_COMPAT_BASE_URL` + `OPENAI_COMPAT_MODEL` (+ key).            |
-| `mymemory`          | MyMemory                         | 5,000 characters/day without key             | Keyless safety net. No context, glossary or register; basic quality. |
+| Id                  | Service · model                  | Free tier (approx.)                          | Own budget    | Notes                                                                |
+| ------------------- | -------------------------------- | -------------------------------------------- | ------------- | -------------------------------------------------------------------- |
+| `gemini-flash-lite` | Google · `gemini-3.5-flash-lite` | shared with `gemini-audio`                   | 6 per minute  | Strongest evidence for Urdu quality.                                 |
+| `gemma`             | Google · `gemma-4-31b-it`        | ~15 requests/min, ~1,500/day, unpublished    | 12 per minute | Same key, separate quota.                                            |
+| `groq-gpt-oss-120b` | Groq · `openai/gpt-oss-120b`     | 30 requests/min, 1,000/day, 8,000 tokens/min | 14 per minute | Fast. Urdu quality is unproven.                                      |
+| `groq-qwen3-8-27b`  | Groq · `qwen/qwen3.8-27b`        | same, separate bucket                        | 14 per minute |                                                                      |
+| `groq-gpt-oss-20b`  | Groq · `openai/gpt-oss-20b`      | same, separate bucket                        | 14 per minute |                                                                      |
+| `custom`            | whatever you configure           | —                                            | none          | `OPENAI_COMPAT_BASE_URL` + `OPENAI_COMPAT_MODEL` (+ key).            |
+| `mymemory`          | MyMemory                         | 5,000 characters/day without key             | 30 per minute | Keyless safety net. No context, glossary or register; basic quality. |
 
 All LLM providers receive the same interpreter prompt: the last few turns of the
 conversation, your glossary, the meeting description and the form of address.
 
 ## Voice
 
-| Id            | Service                            | Free tier                         | Notes                                                                                         |
-| ------------- | ---------------------------------- | --------------------------------- | --------------------------------------------------------------------------------------------- |
-| `azure`       | Azure AI Speech                    | 0.5 million characters/month (F0) | Official API. Tried first when a key is present.                                              |
-| `edge`        | Microsoft Edge read-aloud endpoint | no key, limits unpublished        | Same neural voices. Unofficial: may change or stop without notice.                            |
-| browser voice | the browser's speech synthesis     | free                              | Last resort when the server cannot produce audio. Cannot be routed to the virtual microphone. |
+| Id            | Service                            | Free tier                         | Own budget | Notes                                                                                         |
+| ------------- | ---------------------------------- | --------------------------------- | ---------- | --------------------------------------------------------------------------------------------- |
+| `azure`       | Azure AI Speech                    | 0.5 million characters/month (F0) | none       | Official API. Tried first when a key is present.                                              |
+| `edge`        | Microsoft Edge read-aloud endpoint | no key, limits unpublished        | none       | Same neural voices. Unofficial: may change or stop without notice.                            |
+| browser voice | the browser's speech synthesis     | free                              | none       | Last resort when the server cannot produce audio. Cannot be routed to the virtual microphone. |
+
+The browser voice is used only while "Use the browser's voice if the server voice fails"
+is switched on (Settings → Audio; it is on by default). The first sentence of a translation is synthesized and played on its
+own, and the rest follows while it plays.
 
 Voices: Urdu `ur-PK-UzmaNeural`, `ur-PK-AsadNeural`, `ur-IN-GulNeural`, `ur-IN-SalmanNeural`;
 German `de-DE-KatjaNeural`, `de-DE-ConradNeural` and others; English multilingual voices.

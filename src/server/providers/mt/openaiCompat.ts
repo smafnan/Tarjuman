@@ -1,4 +1,4 @@
-import { httpRequest, readJson } from '../http';
+import { HttpProviderError, httpRequest, readJson } from '../http';
 import { ProviderError, type MtProvider, type MtRequest, type MtResult } from '../types';
 import { answerJsonSchema, buildSystemPrompt, buildUserPrompt, parseInterpreterAnswer } from './prompt';
 
@@ -19,6 +19,11 @@ import { answerJsonSchema, buildSystemPrompt, buildUserPrompt, parseInterpreterA
 export type ChatShape = 'strict' | 'json' | 'plain';
 
 const SHAPE_LADDER: ChatShape[] = ['strict', 'json', 'plain'];
+
+/** Error codes (sent with HTTP 400) that mean "the model's output did not match the schema". */
+const BAD_OUTPUT_CODES = new Set(['json_validate_failed']);
+/** Error codes that mean "this model id is retired or unknown". */
+const MODEL_GONE_CODES = new Set(['model_decommissioned', 'model_not_found']);
 
 interface ChatCompletionResponse {
   choices?: { message?: { content?: string | null }; finish_reason?: string }[];
@@ -45,6 +50,8 @@ export interface OpenAiCompatOptions {
   requestsPerMinute?: number;
   timeoutMs?: number;
   fetchImpl?: typeof fetch;
+  /** Opens a connection to the host of a URL ahead of a request (see `prepare`). */
+  warm?: (url: string) => void;
 }
 
 export function buildChatBody(
@@ -104,6 +111,11 @@ export class OpenAiCompatMtProvider implements MtProvider {
     return this.options.requiresKey ? Boolean(this.options.getKey()) : true;
   }
 
+  prepare(): void {
+    const baseUrl = this.options.getBaseUrl()?.replace(/\/+$/, '');
+    if (baseUrl && this.isConfigured()) this.options.warm?.(`${baseUrl}/models`);
+  }
+
   async translate(request: MtRequest): Promise<MtResult> {
     const baseUrl = this.options.getBaseUrl()?.replace(/\/+$/, '');
     const model = this.options.getModel();
@@ -146,10 +158,21 @@ export class OpenAiCompatMtProvider implements MtProvider {
         if (usedShape === this.shapeIndex) this.shapeProven = true;
         return { translations: answer.translations, skipped: answer.skip };
       } catch (error) {
+        const code = (error instanceof HttpProviderError ? error.code : undefined) ?? '';
+        if (error instanceof HttpProviderError && BAD_OUTPUT_CODES.has(code)) {
+          // The request was fine and the model's answer was not. Stepping down for it would
+          // trade the schema and the reasoning controls for a weaker request, for good.
+          throw new ProviderError(this.id, 'bad_response', error.message, {
+            status: error.status,
+            cause: error,
+          });
+        }
         const rejectedShape =
           error instanceof ProviderError &&
           error.kind === 'bad_request' &&
-          (error.status === 400 || error.status === 422);
+          (error.status === 400 || error.status === 422) &&
+          // No request shape brings a retired model back; trying them all only costs time.
+          !MODEL_GONE_CODES.has(code);
         if (!rejectedShape) throw error;
         // Another request in flight already stepped down: retry with the shape it moved to.
         if (usedShape !== this.shapeIndex) continue;

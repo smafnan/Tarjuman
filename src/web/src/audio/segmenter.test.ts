@@ -171,4 +171,143 @@ describe('Segmenter', () => {
     expect(high.startThreshold).toBeLessThan(low.startThreshold);
     expect(high.endThreshold).toBeLessThan(low.endThreshold);
   });
+
+  it('sends a one-word answer with 160 ms of detected speech', () => {
+    const { segments, feed } = harness();
+    feed(500, 0.02);
+    feed(160, 0.95); // 5 frames: "Ja"
+    feed(800, 0.02);
+    expect(segments).toHaveLength(1);
+  });
+
+  it('reports how long ago the speech stopped when the utterance is declared over', () => {
+    const { segments, feed, segmenter } = harness();
+    feed(960, 0.95);
+    feed(800, 0.02); // ends after 640 ms of silence
+    expect(segments[0]!.trailingSilenceMs).toBe(640);
+
+    feed(960, 0.95);
+    segmenter.flush(); // push-to-talk released in mid-speech: nothing was waited for
+    expect(segments[1]!.trailingSilenceMs).toBe(0);
+  });
+
+  it('reports the audio that follows a forced cut as time since that speech ended', () => {
+    const { segments, feed } = harness();
+    feed(13_504, 0.95); // 422 frames
+    feed(64, 0.4); // the dip the cut lands on
+    feed(1_440, 0.95); // frame 469 crosses 15 s: 45 frames already belong to the next segment
+    expect(segments).toHaveLength(1);
+    expect(segments[0]!.trailingSilenceMs).toBe(45 * FRAME_MS);
+  });
+
+  describe('pre-roll right after an utterance ended', () => {
+    /** The 1-based index of the frame each 512-sample block came from. */
+    const frameIndexes = (segment: Segment) => {
+      const out: number[] = [];
+      for (let i = 0; i < segment.samples.length; i += FRAME_SAMPLES) out.push(segment.samples[i]!);
+      return out;
+    };
+
+    it('keeps the soft onset of a sentence that starts just as the pause ends the previous one', () => {
+      const { segments, feed } = harness({ pauseMs: 650 });
+      feed(20 * FRAME_MS, 0.02); // frames 1..20
+      feed(40 * FRAME_MS, 0.95); // sentence 1: frames 21..60
+      feed(18 * FRAME_MS, 0.02); // frames 61..78
+      feed(3 * FRAME_MS, 0.3); // frames 79..81: an onset consonant, not yet speech for the detector
+      expect(segments).toHaveLength(1);
+      feed(40 * FRAME_MS, 0.95); // sentence 2: frames 82..121
+      feed(21 * FRAME_MS, 0.02);
+      expect(segments).toHaveLength(2);
+
+      const first = frameIndexes(segments[0]!);
+      const second = frameIndexes(segments[1]!);
+      // Sentence 1 keeps its 160 ms tail (5 frames); the 10 frames before sentence 2 lead it in.
+      expect(first.at(-1)).toBe(65);
+      expect(second[0]).toBe(72);
+      expect(second.at(-1)).toBe(126);
+    });
+
+    it('gives a sentence the full pre-roll however soon it follows the previous one', () => {
+      for (const gapFrames of [0, 1, 2, 5, 10]) {
+        const { segments, feed } = harness({ pauseMs: 650 });
+        feed(40 * FRAME_MS, 0.95);
+        feed(21 * FRAME_MS, 0.02); // the 21st silent frame ends the utterance
+        feed(gapFrames * FRAME_MS, 0.02);
+        const firstSpeechFrame = 40 + 21 + gapFrames + 1;
+        feed(40 * FRAME_MS, 0.95);
+        feed(21 * FRAME_MS, 0.02);
+        expect(firstSpeechFrame - frameIndexes(segments[1]!)[0]!).toBe(10);
+      }
+    });
+
+    it('never repeats audio that the previous utterance already contained', () => {
+      const { segments, feed } = harness({ pauseMs: 650, tailPadMs: 600 });
+      feed(40 * FRAME_MS, 0.95);
+      feed(21 * FRAME_MS, 0.02); // 18 of these frames stay with sentence 1 as its tail
+      feed(40 * FRAME_MS, 0.95);
+      feed(21 * FRAME_MS, 0.02);
+      const lastOfFirst = frameIndexes(segments[0]!).at(-1)!;
+      expect(frameIndexes(segments[1]!)[0]).toBe(lastOfFirst + 1);
+    });
+  });
+
+  describe('the rest of a sentence after a forced split', () => {
+    it('delivers a short remainder (one closing word) after the 15 s cut', () => {
+      const { segments, feed } = harness({ pauseMs: 650 });
+      // The quietest frame is the one that crosses the cap, so the cut leaves nothing behind.
+      feed(468 * FRAME_MS, 0.97);
+      feed(FRAME_MS, 0.9);
+      expect(segments).toHaveLength(1);
+      expect(segments[0]!.forcedSplit).toBe(true);
+      feed(4 * FRAME_MS, 0.95); // 128 ms: one short word, less than minSpeechMs
+      feed(21 * FRAME_MS, 0.02);
+      expect(segments).toHaveLength(2);
+      expect(segments[1]!.forcedSplit).toBe(false);
+      expect(segments[1]!.durationMs).toBe((4 + 5) * FRAME_MS);
+    });
+
+    it('emits nothing more when the speaker stopped exactly at the cut', () => {
+      const { segments, events, feed, segmenter } = harness({ pauseMs: 650 });
+      feed(468 * FRAME_MS, 0.97);
+      feed(FRAME_MS, 0.9);
+      feed(21 * FRAME_MS, 0.02);
+      expect(segments).toHaveLength(1);
+      expect(events).toEqual(['start', 'end']);
+      segmenter.flush();
+      expect(segments).toHaveLength(1);
+    });
+
+    it('applies the minimum again to speech that starts after the remainder', () => {
+      const { segments, feed } = harness({ pauseMs: 650 });
+      feed(468 * FRAME_MS, 0.97);
+      feed(FRAME_MS, 0.9);
+      feed(4 * FRAME_MS, 0.95);
+      feed(21 * FRAME_MS, 0.02);
+      feed(4 * FRAME_MS, 0.95); // an unrelated 128 ms blip
+      feed(21 * FRAME_MS, 0.02);
+      expect(segments).toHaveLength(2);
+    });
+  });
+
+  it('treats a closed gate (probability forced to 0) as the pause that ends the utterance', () => {
+    const { segments, feed } = harness({ pauseMs: 650 });
+    feed(30 * FRAME_MS, 0.95);
+    feed(21 * FRAME_MS, 0);
+    expect(segments).toHaveLength(1);
+    expect(segments[0]!.durationMs).toBe((30 + 5) * FRAME_MS);
+  });
+
+  it('treats a probability that is not a number as silence', () => {
+    const { segments, events, feed } = harness();
+    feed(3_200, Number.NaN);
+    expect(events).toEqual([]);
+
+    // Inside an utterance it counts towards the closing pause instead of keeping it open.
+    feed(800, 0.95);
+    feed(640, Number.NaN);
+    expect(events).toEqual(['start', 'end']);
+    expect(segments).toHaveLength(1);
+    feed(640, Number.POSITIVE_INFINITY);
+    expect(events).toEqual(['start', 'end']);
+  });
 });

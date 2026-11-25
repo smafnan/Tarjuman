@@ -26,7 +26,7 @@ with English alongside. It runs on free tiers; nothing to pay for a proof of con
 
 ## Quick start
 
-You need [Node.js 22](https://nodejs.org) or newer and Chrome (or Edge) on a computer.
+You need [Node.js](https://nodejs.org) 22.13 or newer and Chrome (or Edge) on a computer.
 
 ```bash
 npm install
@@ -36,12 +36,23 @@ npm start
 
 Open **http://localhost:8787**.
 
+On Windows you can instead double-click **start-tarjuman.cmd** in the project folder. It
+installs and builds what is missing the first time, starts the server and opens the browser.
+
+Settings can go in a file named `.env` (see [.env.example](.env.example)); you do not need
+one to start. To create it, run `Copy-Item .env.example .env` in PowerShell (`cp .env.example .env`
+on macOS and Linux). Keys can also simply be pasted in the app, as in step 1.
+
 1. **Add a free key.** Settings → API keys. Paste a [Groq key](https://console.groq.com/keys)
-   (speech recognition, required) and a [Google AI Studio key](https://aistudio.google.com/apikey)
-   (best Urdu accuracy, recommended). Neither needs a credit card. Press **Test providers**.
-2. **Try it without Teams.** Press **Start microphone**, say a sentence in Urdu, pause.
-   The German translation appears and is spoken through your speakers. Typing in the box
-   at the bottom works too, even before you have any key.
+   and a [Google AI Studio key](https://aistudio.google.com/apikey). Neither needs a credit
+   card. At least one of the two is needed to understand speech: Gemini alone is enough
+   and gives the best Urdu accuracy; Groq adds fast German and English recognition and a
+   fallback. Press **Test providers**.
+2. **Try it without Teams.** Put on headphones, or switch off "I am using headphones"
+   under Settings → Audio first: that setting is on by default, and with loudspeakers the
+   microphone would hear the translation and translate it again. Then press **Start
+   microphone**, say a sentence in Urdu, pause. The German translation appears and is
+   spoken. Typing in the box at the bottom works too, even before you have any key.
 3. **Connect it to Teams.** Open the **Setup guide** in the app, or read
    [docs/TEAMS-SETUP.md](docs/TEAMS-SETUP.md). In short: install a virtual audio cable,
    choose it under "Translated voice goes to" and as the microphone in Teams, and let
@@ -84,12 +95,12 @@ Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## What it uses
 
-| Step                                 | First choice                                                               | Fallbacks                                                                                         |
-| ------------------------------------ | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| Speech recognition, Urdu             | Google Gemini Flash-Lite (hears the audio and translates in the same call) | Whisper large-v3, then large-v3-turbo, on Groq                                                    |
-| Speech recognition, German / English | Whisper large-v3 on Groq                                                   | Whisper large-v3-turbo, Gemini                                                                    |
-| Translation                          | Gemini Flash-Lite                                                          | Gemma, then three models on Groq, any OpenAI-compatible endpoint you configure, MyMemory (no key) |
-| Voice                                | Microsoft neural voices (Edge read-aloud endpoint, no key)                 | Azure AI Speech if you add a key; the browser's own voice as a last resort                        |
+| Step                                 | First choice                                                               | Fallbacks                                                                                                       |
+| ------------------------------------ | -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Speech recognition, Urdu             | Google Gemini Flash-Lite (hears the audio and translates in the same call) | Whisper large-v3, then large-v3-turbo, on Groq                                                                  |
+| Speech recognition, German / English | Whisper large-v3 on Groq                                                   | Whisper large-v3-turbo, Gemini                                                                                  |
+| Translation                          | Gemini Flash-Lite                                                          | Gemma, then three models on Groq, any OpenAI-compatible endpoint you configure, MyMemory (no key)               |
+| Voice                                | Azure AI Speech, when you have added a key                                 | Microsoft neural voices through the Edge read-aloud endpoint (no key); the browser's own voice as a last resort |
 
 With only a Groq key everything works; Urdu recognition is then Whisper's, which is
 noticeably less accurate than Gemini's for Urdu mixed with English terms. Model names,
@@ -105,7 +116,9 @@ limits and how to change them: [docs/PROVIDERS.md](docs/PROVIDERS.md).
 - **Fill in the glossary** (Settings → Languages & style) with the names of people,
   products and projects. It fixes most "wrong word" problems.
 - **Describe the meeting** in one sentence in the same place. It helps with jargon.
-- **Push-to-talk** (channel panel → Advanced) avoids interpreting side conversations.
+- **Push-to-talk** (channel panel → Advanced) avoids interpreting side conversations. Hold
+  Space to talk. It works only while the Tarjuman window has focus: holding Space while
+  Teams is in front sends the key to Teams.
 
 ## Things to know before a real meeting
 
@@ -117,6 +130,8 @@ limits and how to change them: [docs/PROVIDERS.md](docs/PROVIDERS.md).
   which providers are ever contacted; see [docs/PROVIDERS.md](docs/PROVIDERS.md).
 - **Google's terms** require its paid tier for applications offered to users in the EEA,
   the UK and Switzerland. Leave the Gemini key out, or enable billing on it, if that applies to you.
+- **API keys** saved from the app are stored in `data/keys.json`, which only your own
+  account can read (file mode 0600 on Linux and macOS, an access-control list on Windows).
 - **The keyless voice** uses the endpoint the Edge browser uses for "Read aloud". It is not
   an official public API and may stop working without notice. For regular use add an
   Azure AI Speech key: same voices, supported API, free tier of 0.5 million characters a month.
@@ -134,9 +149,11 @@ Verified by automated tests (`npm run check`, `npm run test:e2e`):
 
 - Speech detection and sentence segmentation in a real Chromium, fed with recorded German speech.
 - The complete path browser → server → browser with the offline mock providers: protocol,
-  ordering, audio decoding and playback.
+  ordering, audio decoding and playback; the layout in narrow windows, and push-to-talk.
 - The fallback chain (cooldowns, budgets, hedged requests), the hallucination filter,
   prompt parsing, and the request each provider sends, against recorded response shapes.
+- Playback, device changes and reconnects in the browser, against stand-ins for the audio
+  and network interfaces whose behaviour was measured in Chromium first.
 - The Edge voice protocol against a local stand-in service, with authentication tokens
   checked against the reference implementation.
 
@@ -144,8 +161,13 @@ Verified by hand against the real services (November 2026):
 
 - The keyless Microsoft neural voices: Urdu, German and English speech synthesized, and
   every voice in the catalogue exists on the service.
-- The keyless path end to end through the server: typed German → MyMemory → Urdu voice,
-  and typed Urdu → German voice, in 2–3 seconds.
+- The keyless path end to end through the server: typed German → MyMemory → Urdu voice.
+  The translated voice started 1.2 to 2.2 seconds after a sentence was sent (median 1.7 s;
+  3.1 s before connections were kept open and opened ahead). Of that, the voice itself took
+  about 0.4 s; the rest is the keyless translator, the slowest one in the chain.
+- Connections to Groq and Google: a request on a connection that had been idle for 30
+  seconds took as long as one on a fresh connection minus the handshake (about 300 ms and
+  150 ms instead of 540 ms and 400 ms, measured with requests that carry no key).
 - The Groq and Google endpoints are reached with the real requests, and an invalid key is
   reported correctly by both.
 
@@ -160,11 +182,14 @@ Not verified, because it needs your keys and a real call:
 ## Development
 
 ```bash
-npm run dev        # server on :8787 with reload, web app on http://localhost:5173
-npm run check      # type-check, lint, unit and integration tests
-npm run test:e2e   # browser tests (builds first)
-TARJUMAN_MOCK=1 npm start   # offline fakes instead of real providers
+npm run dev          # server on :8787 with reload, web app on http://localhost:5173
+npm run check        # type-check, lint, unit and integration tests
+npx playwright install chromium   # once, before the first browser test
+npm run test:e2e     # browser tests (builds first)
+npm run build && npm run start:mock   # offline fakes instead of real providers
 ```
+
+`start:mock` works in every shell. You can also put `TARJUMAN_MOCK=1` in `.env`.
 
 `http://localhost:5173/?demo=1` shows the interface with sample data and no server.
 Configuration is described in [.env.example](.env.example); conventions for contributors
@@ -173,20 +198,60 @@ running the server elsewhere. An access token is then mandatory, browsers requir
 for the microphone on anything but `localhost`, and behind a reverse proxy `PUBLIC_ORIGIN`
 must be set to the address people open.
 
+### Docker
+
+1. Copy `.env.example` to `.env` and set `ACCESS_TOKEN` to a value of at least 8 characters
+   (add your keys there too, or paste them in the app).
+2. Run `docker compose up --build`.
+3. Open `http://localhost:8787/?token=<your ACCESS_TOKEN>`.
+
+The port is published on this computer only. Keys saved from the app are kept in a Docker
+volume.
+
 ## Troubleshooting
 
-| Symptom                                                          | What to do                                                                                                                                                                                                                                                 |
-| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| "Speech recognition needs a free API key"                        | Add a Groq key under Settings → API keys.                                                                                                                                                                                                                  |
-| A provider shows FAIL in `npm run doctor` with "model not found" | The provider retired that model. Set a current one in `.env` (see `.env.example`, section Models).                                                                                                                                                         |
-| The other side hears nothing                                     | "Translated voice goes to" must be the virtual cable, and the Teams microphone its other end. Use "Play a test phrase" in the setup guide and watch the Teams microphone level.                                                                            |
-| The other side hears a chopped voice                             | In Teams → Settings → Devices set Noise suppression to Low or Off and turn Voice isolation off.                                                                                                                                                            |
-| Nothing happens when they speak                                  | When sharing, the "Also share tab audio" box must be ticked. Stop and capture again.                                                                                                                                                                       |
-| You hear the original and the translation on top of each other   | Lower the Teams volume, or switch on "Mute the captured tab itself" (Advanced) and set the original voice volume to taste.                                                                                                                                 |
-| Your own translation is translated back                          | Wear headphones, or switch off "I am using headphones".                                                                                                                                                                                                    |
-| Translations arrive late                                         | Look at the latency badge on each entry. Shorten "Pause that ends a sentence", speak in shorter sentences, or check which provider is active in the status chips.                                                                                          |
-| Voice is missing, captions work                                  | The voice provider failed (see the note on the entry). Add an Azure AI Speech key.                                                                                                                                                                         |
-| Behind a company proxy nothing connects                          | Start the server with the proxy in the real environment, not in `.env`: `HTTPS_PROXY=http://proxy:3128 NODE_USE_ENV_PROXY=1 npm start` (needs Node 22.21 or newer). If the proxy inspects TLS, also point `NODE_EXTRA_CA_CERTS` at your company's CA file. |
+| Symptom                                                          | What to do                                                                                                                                                                            |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| "Speech recognition needs a free API key"                        | Add a Groq or a Gemini key under Settings → API keys.                                                                                                                                 |
+| A provider shows FAIL in `npm run doctor` with "model not found" | The provider retired that model. Set a current one in `.env` (see `.env.example`, section Models).                                                                                    |
+| The other side hears nothing                                     | "Translated voice goes to" must be the virtual cable, and the Teams microphone its other end. Use "Play a test phrase" in the setup guide and watch the Teams microphone level.       |
+| The other side hears a chopped voice                             | In Teams → Settings → Devices set Noise suppression to Low or Off and turn Voice isolation off.                                                                                       |
+| Nothing happens when they speak                                  | When sharing, the "Also share tab audio" box must be ticked. Stop and capture again.                                                                                                  |
+| You hear the original and the translation on top of each other   | Lower the Teams volume, or switch on "Mute the captured tab itself" (Advanced) and set the original voice volume to taste.                                                            |
+| Your own translation is translated back                          | Wear headphones, or switch off "I am using headphones".                                                                                                                               |
+| Translations arrive late                                         | Look at the latency badge on each entry. Shorten "Pause that ends a sentence", speak in shorter sentences, or check which provider is active in the status chips.                     |
+| Voice is missing, captions work                                  | The voice provider failed (see the note on the entry). Add an Azure AI Speech key.                                                                                                    |
+| Behind a company proxy nothing connects                          | Put `HTTPS_PROXY` in `.env` (see "Behind a company proxy" below).                                                                                                                     |
+| "Translated speech cannot be played: the audio device stopped."  | The audio device was unplugged or switched off. Plug it in again, or choose another one, and press **Resume audio** in the banner.                                                    |
+| The device and voice controls are gone                           | In a narrow or low window (980 px wide or 720 px high, or less) they are folded behind the **Devices and voice** button of each channel. Make the window larger, or press the button. |
+
+### Behind a company proxy
+
+Put the proxy in `.env`; the server honours it for every provider:
+
+```
+HTTPS_PROXY=http://proxy.example:3128
+```
+
+An address written without `http://` (`proxy.example:3128`) is read the same way. Requests
+to this computer itself, such as a local model server, never go through the proxy; list
+other addresses that must bypass it in `NO_PROXY`. A value that is not a proxy address is
+ignored with a warning when the server starts. If the proxy
+inspects TLS, Node must also trust your company's certificate. Node reads
+`NODE_EXTRA_CA_CERTS` only when it starts, so set it in the real environment before
+`npm start`, not in `.env`:
+
+```
+# PowerShell
+$env:NODE_EXTRA_CA_CERTS = "C:\certs\company-ca.pem"; npm start
+
+# cmd
+set NODE_EXTRA_CA_CERTS=C:\certs\company-ca.pem
+npm start
+
+# bash
+NODE_EXTRA_CA_CERTS=/etc/ssl/company-ca.pem npm start
+```
 
 ## Roadmap
 

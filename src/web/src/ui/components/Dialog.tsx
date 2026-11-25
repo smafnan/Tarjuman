@@ -11,9 +11,9 @@ interface DialogProps {
   className?: string;
   footer?: ReactNode;
   /**
-   * Rendered inside the dialog, above its content. A modal dialog makes the rest of the
-   * page inert and covers it, so anything that must stay visible and clickable while the
-   * dialog is open (the toast region) has to live in here.
+   * Rendered inside the dialog, between its header and its content. A modal dialog makes
+   * the rest of the page inert and covers it, so anything that must stay visible and
+   * clickable while the dialog is open (the toast region) has to live in here.
    */
   overlay?: ReactNode;
   children: ReactNode;
@@ -70,9 +70,9 @@ export function Dialog({ open, onClose, title, icon, className, footer, overlay,
               <X size={18} aria-hidden="true" />
             </button>
           </header>
+          {overlay}
           <div className="dialog__body">{children}</div>
           {footer ? <footer className="dialog__footer">{footer}</footer> : null}
-          {overlay}
         </div>
       ) : null}
     </dialog>

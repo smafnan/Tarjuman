@@ -1,4 +1,5 @@
-import { Mic, MonitorSpeaker, Square, Volume2 } from 'lucide-react';
+import { ChevronDown, Mic, MonitorSpeaker, Square, Volume2 } from 'lucide-react';
+import { useId, useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 
 import { LANGUAGES } from '../../../../shared/languages';
@@ -9,6 +10,7 @@ import { CHANNEL_COPY, sessionChannelPatch } from '../lib/channels';
 import { cx } from '../lib/cx';
 import { deviceOptions } from '../lib/devices';
 import { formatPercent, formatRate, formatSeconds } from '../lib/format';
+import { createHoldKey } from '../lib/pushToTalk';
 import { SelectField, Segmented, Slider, Spinner, Switch } from './controls';
 
 /**
@@ -53,7 +55,8 @@ function CaptureStatus({ channel }: { channel: ChannelId }) {
     return runtime.pttHeld ? (
       <p className="status status--live">Listening…</p>
     ) : (
-      <p className="status">Hold Space to talk</p>
+      // Space goes to whichever window has the keyboard focus: with Teams in front, it goes to Teams.
+      <p className="status">Hold Space to talk while this window is focused</p>
     );
   }
   if (runtime.gated) return <p className="status">Paused while the translation plays</p>;
@@ -100,11 +103,16 @@ function Activity({ channel }: { channel: ChannelId }) {
 function HoldToTalk() {
   const held = useAppStore((state) => state.channels.outgoing.pttHeld);
   const press = (down: boolean) => () => controller().setPushToTalk(down);
+  // Space is handled for the whole page (usePushToTalk); Enter only has to work on this button.
+  const enter = useMemo(() => createHoldKey(['Enter'], (down) => controller().setPushToTalk(down)), []);
   return (
     <button
       type="button"
       className={cx('ptt', held && 'is-held')}
       aria-pressed={held}
+      onKeyDown={(event) => enter.keydown(event)}
+      onKeyUp={(event) => enter.keyup(event)}
+      onBlur={enter.release}
       onPointerDown={(event) => {
         event.currentTarget.setPointerCapture(event.pointerId);
         controller().setPushToTalk(true);
@@ -354,11 +362,13 @@ export function ChannelPanel({ channel }: { channel: ChannelId }) {
     (state) => channel === 'outgoing' && state.settings.outgoing.micMode === 'push-to-talk',
   );
   const labelsAvailable = useAppStore((state) => state.devices.labelsAvailable);
+  const [expanded, setExpanded] = useState(false);
+  const bodyId = useId();
   const live = capture === 'capturing';
   const Icon = channel === 'outgoing' ? Mic : MonitorSpeaker;
 
   return (
-    <section className={`panel panel--${channel}`} aria-label={copy.title}>
+    <section className={cx('panel', `panel--${channel}`, expanded && 'is-expanded')} aria-label={copy.title}>
       <div className="panel__head">
         <div>
           <h2 className="panel__title">{copy.title}</h2>
@@ -394,17 +404,30 @@ export function ChannelPanel({ channel }: { channel: ChannelId }) {
       {pushToTalk && live ? <HoldToTalk /> : null}
       <Activity channel={channel} />
 
-      {channel === 'outgoing' ? <OutgoingControls /> : <IncomingControls />}
+      {/* Only shown in the compact layouts, where the devices and voice options are folded away. */}
+      <button
+        type="button"
+        className="button button--quiet button--small panel__toggle"
+        aria-expanded={expanded}
+        aria-controls={bodyId}
+        onClick={() => setExpanded((value) => !value)}
+      >
+        <ChevronDown size={14} aria-hidden="true" /> Devices and voice
+      </button>
 
-      {!labelsAvailable ? (
-        <button
-          type="button"
-          className="button button--small"
-          onClick={() => void controller().unlockDeviceLabels()}
-        >
-          Show device names
-        </button>
-      ) : null}
+      <div className="panel__body" id={bodyId}>
+        {channel === 'outgoing' ? <OutgoingControls /> : <IncomingControls />}
+
+        {!labelsAvailable ? (
+          <button
+            type="button"
+            className="button button--small"
+            onClick={() => void controller().unlockDeviceLabels()}
+          >
+            Show device names
+          </button>
+        ) : null}
+      </div>
     </section>
   );
 }

@@ -204,6 +204,8 @@ export interface GeminiProviderOptions {
   /** Candidate model ids, most preferred first. */
   models: readonly string[];
   fetchImpl?: typeof fetch;
+  /** Opens a connection to the host of a URL ahead of a request (see `prepare`). */
+  warm?: (url: string) => void;
 }
 
 function requireKey(providerId: string, getKey: () => string | undefined): string {
@@ -230,6 +232,10 @@ abstract class GeminiTextMt implements MtProvider {
 
   isConfigured(): boolean {
     return Boolean(this.options.getKey());
+  }
+
+  prepare(): void {
+    if (this.isConfigured()) this.options.warm?.(`${API_BASE}/models`);
   }
 
   async translate(request: MtRequest): Promise<MtResult> {
@@ -322,6 +328,10 @@ export class GeminiAudioSttProvider implements SttProvider {
     return true;
   }
 
+  prepare(): void {
+    if (this.isConfigured()) this.options.warm?.(`${API_BASE}/models`);
+  }
+
   async transcribe(request: SttRequest): Promise<SttResult> {
     const apiKey = requireKey(this.id, this.options.getKey);
     // Without a translation job we still use the interpreter prompt, asking only for English,
@@ -354,9 +364,13 @@ export class GeminiAudioSttProvider implements SttProvider {
     );
     const answer = parseInterpreterAnswer(this.id, raw, job, { withTranscript: true });
     if (answer.skip) return { text: '' };
-    return {
-      text: answer.transcript,
-      translations: request.translate ? answer.translations : undefined,
-    };
+    // A good transcript is worth keeping when the translation that came with it is not:
+    // the pipeline then translates it through the translation chain, which beats falling
+    // back to a weaker recognizer for the whole utterance.
+    const spokenLang = request.translate?.targetLangs[0];
+    if (spokenLang === undefined || answer.translations[spokenLang] === undefined) {
+      return { text: answer.transcript };
+    }
+    return { text: answer.transcript, translations: answer.translations };
   }
 }

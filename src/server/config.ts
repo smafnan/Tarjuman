@@ -1,6 +1,21 @@
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 
 import { z } from 'zod';
+
+/**
+ * The directory that contains package.json, found by walking up from `startDir`. It is the
+ * same for `src/server/*.ts` (tsx) and for the bundle `dist/server/index.js`, so .env, data
+ * and the built web app are found whatever folder the server was started from.
+ */
+export function findProjectRoot(startDir: string = import.meta.dirname): string {
+  for (let dir = path.resolve(startDir); ; dir = path.dirname(dir)) {
+    if (existsSync(path.join(dir, 'package.json'))) return dir;
+    if (path.dirname(dir) === dir) return process.cwd();
+  }
+}
+
+export const PROJECT_ROOT = findProjectRoot();
 
 /**
  * Process configuration, read once from the environment (see `.env.example`).
@@ -32,7 +47,7 @@ const envSchema = z.object({
   HOST: z.string().min(1).default('127.0.0.1'),
   /** When set, the API and WebSocket require this token. Mandatory when listening beyond localhost. */
   ACCESS_TOKEN: z.string().min(8).optional(),
-  /** Directory for keys saved from the UI. */
+  /** Directory for keys saved from the UI (relative paths start at the project folder). */
   DATA_DIR: z.string().min(1).default('data'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   /** Log transcripts and translations (off by default: meeting content stays out of logs). */
@@ -95,7 +110,7 @@ export class ConfigError extends Error {
   }
 }
 
-export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd: string = process.cwd()): AppConfig {
+export function loadConfig(env: NodeJS.ProcessEnv = process.env, baseDir: string = PROJECT_ROOT): AppConfig {
   // An empty value means "not set": a copied .env.example is full of `NAME=` lines.
   const provided = Object.fromEntries(
     Object.entries(env).filter(([, value]) => value !== undefined && value.trim() !== ''),
@@ -127,13 +142,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd: string = p
     port: e.PORT,
     host: e.HOST,
     accessToken: e.ACCESS_TOKEN,
-    dataDir: path.resolve(cwd, e.DATA_DIR),
+    dataDir: path.resolve(baseDir, e.DATA_DIR),
     logLevel: e.LOG_LEVEL,
     logTranscripts: e.LOG_TRANSCRIPTS ?? false,
     keysWritable: e.KEYS_WRITABLE ?? (local && !e.ACCESS_TOKEN),
     mock: e.TARJUMAN_MOCK ?? false,
     providerOrder: { stt: e.STT_PROVIDERS, mt: e.MT_PROVIDERS, tts: e.TTS_PROVIDERS },
-    webDir: path.resolve(cwd, e.WEB_DIR ?? 'dist/web'),
+    webDir: path.resolve(baseDir, e.WEB_DIR ?? 'dist/web'),
     publicOrigin: e.PUBLIC_ORIGIN,
   };
 }

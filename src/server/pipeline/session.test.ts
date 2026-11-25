@@ -40,8 +40,10 @@ const SENTENCE: Record<LangCode, string> = {
 function harness(
   scripts: { stt?: SttScript; mt?: MtScript; tts?: TtsScript } = {},
   settings?: SessionSettings,
-  options: { recognizerMayTranslate?: boolean } = {},
+  options: { recognizerMayTranslate?: boolean; now?: () => number; ttsTimeoutMs?: number } = {},
 ) {
+  /** Providers that were told a request is coming, in order. */
+  const prepared: string[] = [];
   const sttRequests: SttRequest[] = [];
   const mtRequests: MtRequest[] = [];
   const ttsRequests: TtsRequest[] = [];
@@ -54,6 +56,7 @@ function harness(
     timeoutMs: 5_000,
     isConfigured: () => true,
     supportsLanguage: () => true,
+    prepare: () => void prepared.push('stt'),
     transcribe: async (request) => {
       sttRequests.push(request);
       return scripts.stt
@@ -69,6 +72,7 @@ function harness(
     contextAware: true,
     timeoutMs: 5_000,
     isConfigured: () => true,
+    prepare: () => void prepared.push('mt'),
     translate: async (request) => {
       mtRequests.push(request);
       if (scripts.mt) return scripts.mt(request, mtRequests.length - 1);
@@ -80,9 +84,10 @@ function harness(
     kind: 'tts',
     label: 'tts',
     requiresKey: false,
-    timeoutMs: 5_000,
+    timeoutMs: options.ttsTimeoutMs ?? 5_000,
     isConfigured: () => true,
     supportsLanguage: () => true,
+    prepare: () => void prepared.push('tts'),
     voices: () => [],
     synthesize: async (request) => {
       ttsRequests.push(request);
@@ -107,6 +112,7 @@ function harness(
       recognizerMayTranslate: options.recognizerMayTranslate ?? true,
     },
     logger: { debug: () => undefined, info: () => undefined, warn: () => undefined, error: () => undefined },
+    now: options.now,
     transport: {
       send: (message) => {
         events.push(message);
@@ -151,7 +157,7 @@ function harness(
   const of = <T extends ServerMessage['type']>(type: T) =>
     events.filter((event): event is Extract<ServerMessage, { type: T }> => event.type === type);
 
-  return { session, events, speech, order, audio, of, sttRequests, mtRequests, ttsRequests };
+  return { session, events, speech, order, audio, of, sttRequests, mtRequests, ttsRequests, prepared };
 }
 
 describe('InterpreterSession', () => {
@@ -218,8 +224,21 @@ describe('InterpreterSession', () => {
     expect(h.of('utterance.translation')[0]?.provider).toBe('mt');
   });
 
-  it('still translates when the recognizer returned only some of the languages', async () => {
+  it('speaks what the recognizer translated even when it left a caption language out', async () => {
     const h = harness({ stt: () => ({ text: SENTENCE.ur, translations: { de: 'Nur Deutsch.' } }) });
+    h.audio('u1');
+    await h.session.idle();
+    // A missing English caption is not worth a second request and a second of delay.
+    expect(h.mtRequests).toHaveLength(0);
+    expect(h.of('utterance.translation')[0]).toMatchObject({
+      provider: 'stt',
+      translations: { de: 'Nur Deutsch.' },
+    });
+    expect(h.speech.map((s) => s.text)).toEqual(['Nur Deutsch.']);
+  });
+
+  it('translates itself when the recognizer left out the language that is spoken', async () => {
+    const h = harness({ stt: () => ({ text: SENTENCE.ur, translations: { en: 'English only.' } }) });
     h.audio('u1');
     await h.session.idle();
     expect(h.mtRequests).toHaveLength(1);
@@ -489,5 +508,138 @@ describe('InterpreterSession', () => {
     h.audio('u2');
     expect(h.events).toEqual([]);
     expect(h.speech).toEqual([]);
+  });
+});
+
+describe('InterpreterSession: staying live', () => {
+  /** A voice request that never answers but honours its abort signal. */
+  const hang = (request: TtsRequest): Promise<Uint8Array> =>
+    new Promise((_resolve, reject) => {
+      request.signal.addEventListener('abort', () => reject(new ProviderError('tts', 'aborted', 'aborted')));
+    });
+
+  it('lets the providers open their connections when somebody starts to speak', () => {
+    const h = harness();
+    h.session.prepare('incoming');
+    expect(h.prepared).toEqual(['stt', 'mt', 'tts']);
+  });
+
+  it('does not prepare a voice for a channel that only shows captions', () => {
+    const settings: SessionSettings = {
+      ...DEFAULT_SESSION_SETTINGS,
+      channels: {
+        ...DEFAULT_SESSION_SETTINGS.channels,
+        incoming: { ...DEFAULT_SESSION_SETTINGS.channels.incoming, speak: false },
+      },
+    };
+    const h = harness({}, settings);
+    h.session.prepare('incoming');
+    expect(h.prepared).toEqual(['stt', 'mt']);
+  });
+
+  it('opens the voice connection as soon as an utterance arrives', async () => {
+    const h = harness();
+    h.audio('u1');
+    expect(h.prepared).toEqual(['tts']);
+    h.session.submitText('t1', 'incoming', 'Guten Morgen.');
+    expect(h.prepared).toEqual(['tts', 'tts']);
+    await h.session.idle();
+  });
+
+  it('keeps captioning both directions while the voice service hangs', async () => {
+    const h = harness({ tts: hang }, undefined, { ttsTimeoutMs: 60_000 });
+    // Twenty sentences from the other side, one after another, then one of my own.
+    for (let i = 0; i < 20; i++) {
+      h.session.submitText(`them${i}`, 'incoming', 'Guten Morgen.');
+      await waitFor(() => h.of('utterance.translation').length === i + 1, `caption ${i}`);
+    }
+    h.session.submitText('mine', 'outgoing', 'یہ ایک ٹیسٹ ہے');
+
+    await waitFor(() => h.of('utterance.translation').length === 21, 'every caption');
+    expect(h.of('utterance.error')).toEqual([]);
+    expect(h.of('utterance.translation').map((event) => event.id)).toContain('mine');
+    h.session.close();
+  });
+
+  it('still refuses a flood of utterances that are not translated yet', async () => {
+    const pending = deferred<MtResult>();
+    const h = harness({ mt: () => pending.promise });
+    for (let i = 0; i < 14; i++) h.session.submitText(`t${i}`, 'incoming', 'Guten Morgen.');
+    expect(h.of('utterance.error').map((event) => [event.id, event.code])).toEqual([
+      ['t12', 'rate_limited'],
+      ['t13', 'rate_limited'],
+    ]);
+    h.session.close();
+  });
+
+  it('stops the request made ahead for the next sentence when a sentence cannot be spoken', async () => {
+    const signals: AbortSignal[] = [];
+    const long = Array.from(
+      { length: 5 },
+      (_, i) => `Dies ist der Satz Nummer ${i + 1} von fünf in einer langen Antwort.`,
+    );
+    const h = harness({
+      mt: () => ({ translations: { de: long.join(' '), en: 'Five sentences.' } }),
+      tts: (request, call) => {
+        signals.push(request.signal);
+        if (call === 0) return new TextEncoder().encode('first');
+        if (call === 1) throw new ProviderError('tts', 'unavailable', 'HTTP 503');
+        return hang(request);
+      },
+    });
+    h.audio('u1');
+    await h.session.idle();
+
+    expect(h.of('utterance.error')[0]).toMatchObject({ id: 'u1', stage: 'tts' });
+    expect(h.ttsRequests.length).toBeGreaterThanOrEqual(3);
+    expect(signals.slice(2).every((signal) => signal.aborted)).toBe(true);
+  });
+
+  it('does not speak a translation whose turn comes far too late', async () => {
+    let time = 1_000_000;
+    const first = deferred<Uint8Array>();
+    const h = harness(
+      { tts: (_request, call) => (call === 0 ? first.promise : new Uint8Array([1])) },
+      undefined,
+      {
+        now: () => time,
+      },
+    );
+    h.session.submitText('t1', 'incoming', 'Guten Morgen.');
+    h.session.submitText('t2', 'incoming', 'Wie geht es Ihnen?');
+    await waitFor(() => h.of('utterance.translation').length === 2, 'both captions');
+
+    // The voice needs 16 s for the first sentence; the second one is stale by then.
+    time += 16_000;
+    first.resolve(new Uint8Array([1]));
+    await h.session.idle();
+
+    expect(h.speech.map((chunk) => chunk.header.id)).toEqual(['t1']);
+    // The browser is told, so that nobody believes the other side heard the sentence.
+    expect(h.of('utterance.done').map((event) => [event.id, event.notSpoken])).toEqual([
+      ['t1', undefined],
+      ['t2', 'late'],
+    ]);
+    expect(h.of('utterance.error')).toEqual([]);
+  });
+
+  it('gives the voice nothing to say when the translation has no words', async () => {
+    const h = harness({ mt: () => ({ translations: { de: '…', en: '...' } }) });
+    h.audio('u1');
+    await h.session.idle();
+    expect(h.ttsRequests).toEqual([]);
+    expect(h.order).toEqual(['transcript:u1', 'translation:u1', 'done:u1']);
+  });
+
+  it('speeds up by the newest report of the playback queue', async () => {
+    const recognized = deferred<SttResult>();
+    const h = harness({ stt: (_request, call) => (call === 0 ? recognized.promise : { text: SENTENCE.ur }) });
+    // The first sentence reports an empty queue; while it is still being recognized, the
+    // next one reports six seconds of speech waiting in the browser.
+    h.audio('u1', 'outgoing', { playbackLagMs: 0 });
+    h.audio('u2', 'outgoing', { playbackLagMs: 6_000 });
+    recognized.resolve({ text: SENTENCE.ur });
+    await h.session.idle();
+    expect(h.ttsRequests.map((request) => request.rate)).toEqual([1.2, 1.2]);
   });
 });

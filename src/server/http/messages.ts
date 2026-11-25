@@ -33,6 +33,7 @@ const clientMessageSchema = z.discriminatedUnion('type', [
       .max(LIMITS.maxTextChars * 2),
   }),
   z.object({ type: z.literal('utterance.cancel'), id: utteranceId }),
+  z.object({ type: z.literal('speech.start'), channel }),
   z.object({ type: z.literal('ping'), t: z.number() }),
 ]);
 
@@ -44,7 +45,12 @@ const audioHeaderSchema = z.object({
   durationMs: z.number().nonnegative(),
   endedAt: z.number().nonnegative(),
   forcedSplit: z.boolean(),
-  playbackLagMs: z.number().nonnegative().max(600_000),
+  // Clamped rather than refused: a browser whose audio device has stalled reports an
+  // ever-growing queue, and that must not cost it the interpretation as well.
+  playbackLagMs: z
+    .number()
+    .nonnegative()
+    .transform((ms) => Math.min(ms, LIMITS.maxPlaybackLagMs)),
 });
 
 export type ParseResult<T> = { ok: true; value: T } | { ok: false; error: string };

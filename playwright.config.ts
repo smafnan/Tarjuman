@@ -44,6 +44,14 @@ export default defineConfig({
       HOST: '127.0.0.1',
       DATA_DIR: mkdtempSync(path.join(tmpdir(), 'tarjuman-e2e-')),
       LOG_LEVEL: 'warn',
+      // Empty values win over a developer's own .env, which would otherwise change the
+      // server under test (an access token, another origin, a provider list).
+      ACCESS_TOKEN: '',
+      PUBLIC_ORIGIN: '',
+      KEYS_WRITABLE: '',
+      STT_PROVIDERS: '',
+      MT_PROVIDERS: '',
+      TTS_PROVIDERS: '',
     },
   },
 });

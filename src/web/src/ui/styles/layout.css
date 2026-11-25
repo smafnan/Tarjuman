@@ -2,6 +2,8 @@
 
 .app {
   display: grid;
+  /* minmax(0, ...) on both axes: a long unbroken word must never widen the page. */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto auto minmax(0, 1fr);
   height: 100dvh;
 }
@@ -117,7 +119,8 @@
   z-index: 20;
   top: calc(100% + 6px);
   right: 0;
-  width: min(360px, calc(100vw - 24px));
+  max-width: calc(100vw - 16px);
+  width: 360px;
   padding: 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -242,6 +245,7 @@
 }
 
 .sidebar {
+  position: relative;
   display: grid;
   align-content: start;
   gap: 12px;
@@ -252,35 +256,11 @@
 }
 
 .reading {
+  position: relative;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   min-width: 0;
   min-height: 0;
-}
-
-@media (max-width: 980px) {
-  .app {
-    height: auto;
-    min-height: 100dvh;
-  }
-
-  .workspace {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .sidebar {
-    overflow: visible;
-    border-right: 0;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .reading {
-    min-height: 70dvh;
-  }
-
-  .chips {
-    justify-content: flex-start;
-  }
 }
 
 /* ------------------------------------------------------------------ channel panel */
@@ -294,6 +274,15 @@
   border-radius: var(--radius);
   background: var(--surface);
   box-shadow: var(--shadow);
+}
+
+.panel__body {
+  display: grid;
+  gap: 12px;
+}
+
+.panel__toggle {
+  display: none;
 }
 
 .panel--outgoing,
@@ -482,6 +471,9 @@
 }
 
 .transcript__scroll {
+  /* Containing block for the visually hidden text inside: without it that text sits
+     outside the scroller and makes the whole page scroll. */
+  position: relative;
   height: 100%;
   overflow-y: auto;
   padding: 18px;
@@ -489,6 +481,7 @@
 
 .transcript__list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   max-width: 980px;
   margin: 0 auto;
@@ -498,6 +491,7 @@
 
 .entry {
   display: grid;
+  min-width: 0;
   gap: 4px;
   max-width: min(100%, 720px);
   padding: 10px 14px 12px;
@@ -533,6 +527,15 @@
 
 .entry__meta svg {
   flex: none;
+}
+
+.entry__source,
+.entry__target,
+.entry__extra,
+.entry__error,
+.entry__note {
+  /* URLs, e-mail addresses and German compounds must wrap instead of widening the page. */
+  overflow-wrap: anywhere;
 }
 
 .entry__source {
@@ -877,7 +880,7 @@
 
 .kbd {
   padding: 0 5px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--control-border);
   border-radius: 4px;
   background: var(--surface-2);
   font: 12px var(--font-mono);
@@ -887,20 +890,51 @@
 /* ------------------------------------------------------------------ toasts */
 
 .toasts {
-  position: fixed;
-  z-index: 50;
-  right: 16px;
-  /* Above the composer, so a message never covers the send button. */
-  bottom: 84px;
   display: grid;
-  gap: 8px;
-  width: min(420px, calc(100vw - 32px));
+  min-width: 0;
 }
 
-/* Inside a dialog, sit in the corner of the screen, clear of the dialog itself. */
-.dialog .toasts {
-  top: 16px;
-  bottom: auto;
+.toasts__group {
+  display: grid;
+  gap: 8px;
+}
+
+.toasts__group:not(:empty) + .toasts__group:not(:empty) {
+  margin-top: 8px;
+}
+
+/*
+ * Over the top corner of the conversation: below the toolbar, clear of both channel panels
+ * and the composer at every window size. Only the messages themselves take clicks.
+ */
+.toasts--page {
+  position: absolute;
+  z-index: 50;
+  top: 44px;
+  right: 12px;
+  align-content: start;
+  width: min(420px, calc(100% - 24px));
+  max-height: calc(100% - 56px);
+  overflow-y: auto;
+  pointer-events: none;
+}
+
+.toasts--page .toast {
+  pointer-events: auto;
+}
+
+/* The page copy keeps its place behind an open dialog but must not show a second time. */
+.toasts.is-covered {
+  visibility: hidden;
+}
+
+/* Inside a dialog: in the flow between header and content, so nothing is covered. */
+.toasts--dialog {
+  flex: none;
+}
+
+.toasts--dialog.has-toasts {
+  padding: 10px 20px 0;
 }
 
 .toast {
@@ -934,4 +968,111 @@
 
 .toast__text {
   overflow-wrap: anywhere;
+}
+
+/* ------------------------------------------------------------------ responsive */
+
+/*
+ * Narrow window (the usual case: beside the Teams call). The page itself never scrolls:
+ * the two channel panels sit side by side in a strip of limited height above the
+ * conversation, which takes the rest and scrolls inside itself.
+ */
+@media (max-width: 980px) {
+  .topbar {
+    gap: 6px 14px;
+    padding: 8px 12px;
+  }
+
+  .workspace {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .sidebar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    gap: 8px;
+    max-height: 40dvh;
+    padding: 8px 12px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .chips {
+    justify-content: flex-start;
+  }
+
+  /* Left-aligned chips: open the list from the left edge, JS keeps it inside the window. */
+  .popover {
+    right: auto;
+    left: 0;
+  }
+
+  .banner {
+    padding: 6px 12px;
+  }
+
+  .chip {
+    max-width: none;
+  }
+
+  .capture {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .capture__button {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .toolbar {
+    padding: 4px 12px;
+  }
+
+  .transcript__scroll {
+    padding: 12px;
+  }
+
+  .composer {
+    padding: 8px 12px 10px;
+  }
+}
+
+/*
+ * Compact panels, for a narrow or a short window: the devices and voice options are folded
+ * away so that Start/Stop, the status line and the level meter of both channels stay in view.
+ */
+@media (max-width: 980px), (max-height: 720px) {
+  .panel {
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .panel__head {
+    flex-wrap: wrap;
+  }
+
+  .panel__toggle {
+    display: inline-flex;
+    justify-self: start;
+  }
+
+  .panel:not(.is-expanded) .panel__body {
+    display: none;
+  }
+
+  .panel.is-expanded .panel__toggle svg {
+    transform: rotate(180deg);
+  }
+}
+
+/* Three provider chips plus the two buttons would take four rows: keep the state dot and name, the list has the rest. */
+@media (max-width: 560px) {
+  .chip__value {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
 }

@@ -17,8 +17,13 @@ import {
   GemmaMtProvider,
 } from './gemini';
 import { buildChatBody, OpenAiCompatMtProvider } from './mt/openaiCompat';
-import { MyMemoryProvider } from './mt/myMemory';
-import { buildWhisperPrompt, GroqWhisperProvider, summarizeSegments } from './stt/groqWhisper';
+import { MyMemoryProvider, queryPieces } from './mt/myMemory';
+import {
+  buildWhisperPrompt,
+  GroqWhisperProvider,
+  summarizeSegments,
+  transcriptFromSegments,
+} from './stt/groqWhisper';
 import { AzureTtsProvider, parseAzureCredentials } from './tts/azure';
 import { resolveVoice, ssmlRate } from './tts/voices';
 import { ProviderError } from './types';
@@ -267,6 +272,74 @@ describe('Gemini', () => {
     const quiet = new GeminiAudioSttProvider({ getKey: () => 'k', models: ['m'], fetchImpl: silence.fetch });
     expect(await quiet.transcribe(request)).toEqual({ text: '' });
   });
+
+  describe('audio provider with an incomplete answer', () => {
+    const transcribe = (answer: unknown, job = translationJob()) => {
+      const { fetch } = fakeFetch(() => geminiAnswer(answer));
+      return new GeminiAudioSttProvider({ getKey: () => 'k', models: ['m'], fetchImpl: fetch }).transcribe({
+        pcm: tonePcm(1),
+        sampleRate: 16_000,
+        language: job.sourceLang,
+        hints: [],
+        translate: job,
+        signal: new AbortController().signal,
+      });
+    };
+
+    it('keeps a good transcript when the spoken translation is missing or invalid', async () => {
+      // Used to throw, which sent the whole utterance to a weaker recognizer.
+      for (const de of ['', URDU, ENGLISH]) {
+        const result = await transcribe({ skip: false, transcript: URDU, en: ENGLISH, de });
+        expect(result).toEqual({ text: URDU });
+        expect(result).not.toHaveProperty('translations');
+      }
+    });
+
+    it('returns the spoken translation without a caption that is missing', async () => {
+      expect(await transcribe({ skip: false, transcript: URDU, en: '', de: GERMAN })).toEqual({
+        text: URDU,
+        translations: { de: GERMAN },
+      });
+    });
+
+    it('accepts an Urdu translation that keeps the product names of the transcript', async () => {
+      const job = translationJob({ sourceLang: 'de', targetLangs: ['ur', 'en'] });
+      const answer = {
+        skip: false,
+        transcript: 'Microsoft Teams und SharePoint.',
+        en: 'Microsoft Teams and SharePoint.',
+        ur: 'Microsoft Teams اور SharePoint۔',
+      };
+      expect(await transcribe(answer, job)).toEqual({
+        text: answer.transcript,
+        translations: { ur: answer.ur, en: answer.en },
+      });
+    });
+
+    it('still fails when the transcript itself is unusable', async () => {
+      const noTranscript = await failure(
+        transcribe({ skip: false, transcript: '', en: ENGLISH, de: GERMAN }),
+      );
+      expect(noTranscript.kind).toBe('bad_response');
+      const hindi = await failure(
+        transcribe({ skip: false, transcript: 'हम अगले हफ्ते मिलेंगे', en: ENGLISH, de: GERMAN }),
+      );
+      expect(hindi.kind).toBe('bad_response');
+    });
+  });
+
+  it('text translation survives a missing caption and fails without the spoken language', async () => {
+    const provider = (answer: unknown) => {
+      const { fetch } = fakeFetch(() => geminiAnswer(answer));
+      return new GeminiMtProvider({ getKey: () => 'k', models: ['m'], fetchImpl: fetch });
+    };
+    expect(await provider({ skip: false, en: '', de: GERMAN }).translate(mtRequest())).toEqual({
+      translations: { de: GERMAN },
+      skipped: false,
+    });
+    const error = await failure(provider({ skip: false, en: ENGLISH, de: '' }).translate(mtRequest()));
+    expect(error.kind).toBe('bad_response');
+  });
 });
 
 describe('Groq Whisper', () => {
@@ -321,6 +394,183 @@ describe('Groq Whisper', () => {
 
   it('copes with a response that has no segments', () => {
     expect(summarizeSegments([])).toEqual({ compressionRatio: undefined });
+    expect(transcriptFromSegments({ text: ' Guten Morgen. ' })).toEqual({
+      text: ' Guten Morgen. ',
+      compressionRatio: undefined,
+    });
+    expect(transcriptFromSegments({ segments: [] })).toBeUndefined();
+  });
+
+  describe('segments', () => {
+    const clear = { avg_logprob: -0.25, no_speech_prob: 0.02, compression_ratio: 1.5 };
+
+    it('leaves out a hallucinated tail instead of letting it hide in the average', () => {
+      const result = must(
+        transcriptFromSegments({
+          text: ' Wir liefern am Montag. Vielen Dank fürs Zuschauen.',
+          segments: [
+            { text: ' Wir liefern am Montag.', start: 0, end: 6, ...clear },
+            {
+              text: ' Vielen Dank fürs Zuschauen.',
+              start: 6,
+              end: 7,
+              avg_logprob: -1.3,
+              no_speech_prob: 0.92,
+              compression_ratio: 0.8,
+            },
+          ],
+        }),
+      );
+      expect(result.text).toBe('Wir liefern am Montag.');
+      expect(result.avgLogProb).toBeCloseTo(-0.25);
+      expect(result.noSpeechProb).toBeCloseTo(0.02);
+      expect(result.compressionRatio).toBe(1.5);
+    });
+
+    it('leaves out one repetitive segment instead of discarding the clear speech around it', () => {
+      const result = must(
+        transcriptFromSegments({
+          text: ' Erster Teil. ja ja ja ja ja ja ja ja ja ja ja ja Dritter Teil.',
+          segments: [
+            { text: ' Erster Teil.', start: 0, end: 5, ...clear, compression_ratio: 1.6 },
+            {
+              text: ' ja ja ja ja ja ja ja ja ja ja ja ja',
+              start: 5,
+              end: 7,
+              ...clear,
+              compression_ratio: 2.5,
+            },
+            { text: ' Dritter Teil.', start: 7, end: 12, ...clear, compression_ratio: 1.7 },
+          ],
+        }),
+      );
+      expect(result.text).toBe('Erster Teil. Dritter Teil.');
+      // Used to be 2.5, the maximum over all segments, which dropped the whole utterance.
+      expect(result.compressionRatio).toBe(1.7);
+    });
+
+    it('measures an Urdu segment against the threshold for Arabic script', () => {
+      const urdu = {
+        text: ' پہلی قسط دس ہزار یورو کی ہوگی، دوسری قسط بیس ہزار یورو کی ہوگی۔',
+        start: 0,
+        end: 6,
+        ...clear,
+        compression_ratio: 2.46,
+      };
+      const next = { text: ' اس کے بعد ہم بات کریں گے۔', start: 6, end: 9, ...clear };
+      const text = `${urdu.text}${next.text}`;
+      expect(must(transcriptFromSegments({ text, segments: [urdu, next] })).text).toBe(text);
+      const loop = { ...urdu, compression_ratio: 3.4 };
+      expect(must(transcriptFromSegments({ text, segments: [loop, next] })).text).toBe(next.text.trim());
+    });
+
+    describe('in Urdu with English mixed in', () => {
+      const urdu = ' پہلی قسط دس ہزار یورو کی ہوگی، دوسری قسط بیس ہزار یورو کی ہوگی۔';
+      const english = ' The deployment is on Monday, the testing is on Tuesday.';
+      const closing = ' اس کے بعد ہم کلائنٹ کو ڈیمو دیں گے۔';
+      const text = `${urdu}${english}${closing}`;
+      const timed = (figures: { avg_logprob: number; no_speech_prob: number; compression_ratio: number }[]) =>
+        [urdu, english, closing].map((segment, i) => ({
+          text: segment,
+          start: i * 5,
+          end: i * 5 + 5,
+          ...must(figures[i] ?? figures[0]),
+        }));
+
+      it('does not filter when every segment carries the figures of the whole window', () => {
+        // Reference Whisper copies the window's figures into each of its segments. Judged per
+        // segment, 2.6 passed for the Urdu ones and cut out exactly the English one.
+        const window = { avg_logprob: -0.3, no_speech_prob: 0.03, compression_ratio: 2.6 };
+        expect(must(transcriptFromSegments({ text, segments: timed([window]) }))).toEqual({
+          text,
+          avgLogProb: expect.closeTo(-0.3) as number,
+          noSpeechProb: expect.closeTo(0.03) as number,
+          compressionRatio: 2.6,
+        });
+        // The same for figures that would fail every segment: the filter judges the summary.
+        const silent = { avg_logprob: -1.3, no_speech_prob: 0.9, compression_ratio: 1.2 };
+        const result = must(transcriptFromSegments({ text, segments: timed([silent]) }));
+        expect(result.text).toBe(text);
+        expect(result.noSpeechProb).toBeCloseTo(0.9);
+      });
+
+      it('measures every segment against the limit for the script of the whole utterance', () => {
+        const segments = timed([
+          { ...clear, compression_ratio: 2.5 },
+          { ...clear, compression_ratio: 2.6 },
+          { ...clear, compression_ratio: 1.6 },
+        ]);
+        expect(must(transcriptFromSegments({ text, segments })).text).toBe(text);
+        // A real loop is past the limit of either script.
+        const looping = timed([clear, { ...clear, compression_ratio: 3.2 }, clear]);
+        expect(must(transcriptFromSegments({ text, segments: looping })).text).toBe(
+          `${urdu.trim()} ${closing.trim()}`,
+        );
+      });
+    });
+
+    it('returns everything when a few words would be left of audio that was mostly rejected', () => {
+      const loop = {
+        text: ' und dann und dann und dann und dann und dann und dann und dann und dann',
+        start: 0,
+        end: 9,
+        ...clear,
+        compression_ratio: 4.1,
+      };
+      for (const phrase of [' Danke.', ' Vielen Dank für Ihre Aufmerksamkeit.']) {
+        const stock = { text: phrase, start: 9, end: 10, ...clear };
+        const text = `${loop.text}${phrase}`;
+        // "Danke." with clean figures of its own would pass the filter as speech.
+        expect(must(transcriptFromSegments({ text, segments: [loop, stock] }))).toEqual({
+          text,
+          avgLogProb: expect.closeTo(-0.25) as number,
+          noSpeechProb: expect.closeTo(0.02) as number,
+          compressionRatio: 4.1,
+        });
+      }
+      // A short tail that is removed leaves the longer speech before it, however few its words.
+      const speech = { text: ' Ja, genau.', start: 0, end: 3, ...clear };
+      const tail = { text: ' Vielen Dank.', start: 3, end: 4, avg_logprob: -1.3, no_speech_prob: 0.9 };
+      expect(
+        must(transcriptFromSegments({ text: `${speech.text}${tail.text}`, segments: [speech, tail] })).text,
+      ).toBe('Ja, genau.');
+    });
+
+    it("needs both of Whisper's no-speech signals to leave a segment out", () => {
+      const doubtful = { text: ' Genau.', start: 6, end: 7, avg_logprob: -0.4, no_speech_prob: 0.9 };
+      const segments = [{ text: ' Das machen wir so.', start: 0, end: 6, ...clear }, doubtful];
+      const text = ' Das machen wir so. Genau.';
+      expect(must(transcriptFromSegments({ text, segments })).text).toBe(text);
+    });
+
+    it('returns everything as it came when no segment is usable, for the filter to judge', () => {
+      const silent = { avg_logprob: -1.4, no_speech_prob: 0.9, compression_ratio: 0.9 };
+      const result = must(
+        transcriptFromSegments({
+          text: ' Vielen Dank. Tschüss.',
+          segments: [
+            { text: ' Vielen Dank.', start: 0, end: 1, ...silent },
+            { text: ' Tschüss.', start: 1, end: 2, ...silent },
+          ],
+        }),
+      );
+      expect(result.text).toBe(' Vielen Dank. Tschüss.');
+      expect(result.avgLogProb).toBeCloseTo(-1.4);
+      expect(result.noSpeechProb).toBeCloseTo(0.9);
+    });
+
+    it('falls back to the plain text when the segments carry no text of their own', () => {
+      const result = must(
+        transcriptFromSegments({
+          text: ' Guten Morgen. Danke.',
+          segments: [
+            { start: 0, end: 3, ...clear },
+            { start: 3, end: 4, avg_logprob: -1.3, no_speech_prob: 0.92, compression_ratio: 0.8 },
+          ],
+        }),
+      );
+      expect(result.text).toBe(' Guten Morgen. Danke.');
+    });
   });
 
   it('keeps the prompt short however long the glossary is', () => {
@@ -428,6 +678,63 @@ describe('OpenAI-compatible translation', () => {
     }
   });
 
+  it("treats Groq's HTTP 400 for output that failed the schema as a bad answer, and keeps the request shape", async () => {
+    const seen: string[] = [];
+    const { fetch } = fakeFetch((call, index) => {
+      const body = bodyOf(call);
+      const format = (body.response_format as { type?: string } | undefined)?.type ?? 'plain';
+      seen.push(`${format}/${String(body.reasoning_effort)}`);
+      if (index === 0) {
+        // Body as returned by the live API when the MODEL's output did not validate.
+        return jsonResponse(
+          {
+            error: {
+              message:
+                "Failed to generate JSON. Please adjust your prompt. See 'failed_generation' for more details.",
+              type: 'invalid_request_error',
+              code: 'json_validate_failed',
+              failed_generation: '{"skip": false, "en": "We will rel',
+            },
+          },
+          { status: 400 },
+        );
+      }
+      return chatAnswer({ skip: false, en: ENGLISH, de: GERMAN });
+    });
+    const provider = new OpenAiCompatMtProvider(options(fetch));
+
+    const error = await failure(provider.translate(mtRequest()));
+    expect(error.kind).toBe('bad_response');
+    expect(error.status).toBe(400);
+    expect(error.message).toContain('Failed to generate JSON');
+    await provider.translate(mtRequest());
+
+    // Used to be: json_schema, json_object, json_object — the reasoning controls gone for good.
+    expect(seen).toEqual(['json_schema/low', 'json_schema/low']);
+  });
+
+  it('does not try other request shapes for a retired or unknown model', async () => {
+    const cases: [status: number, code: string, message: string][] = [
+      [400, 'model_decommissioned', 'The model `x` has been decommissioned and is no longer supported.'],
+      [400, 'model_not_found', 'The model `x` does not exist or you do not have access to it.'],
+      [404, 'model_not_found', 'The model `x` does not exist or you do not have access to it.'],
+      [404, '', 'Not Found'],
+    ];
+    for (const [status, code, message] of cases) {
+      const { fetch, calls } = fakeFetch(() =>
+        jsonResponse(
+          { error: { message, type: 'invalid_request_error', ...(code ? { code } : {}) } },
+          { status },
+        ),
+      );
+      const provider = new OpenAiCompatMtProvider(options(fetch));
+      const error = await failure(provider.translate(mtRequest()));
+      expect(error.kind, `${status} ${code}`).toBe('bad_request');
+      // Used to be three sequential requests for the 400s.
+      expect(calls, `${status} ${code}`).toHaveLength(1);
+    }
+  });
+
   it('works without a key for local endpoints, and needs endpoint and model to be configured', async () => {
     const { fetch, calls } = fakeFetch(() => chatAnswer({ skip: false, en: ENGLISH, de: GERMAN }));
     const local = new OpenAiCompatMtProvider(
@@ -504,7 +811,7 @@ describe('MyMemory', () => {
     });
   });
 
-  it('recognises a used-up quota, a wrong-script answer and over-long text', async () => {
+  it('recognises a used-up quota and a wrong-script answer', async () => {
     const quota = fakeFetch(() =>
       jsonResponse({
         responseStatus: 429,
@@ -531,17 +838,119 @@ describe('MyMemory', () => {
         )
       ).kind,
     ).toBe('bad_response');
+  });
 
-    const none = fakeFetch(() => jsonResponse({}));
-    const tooLong = mtRequest({ sourceLang: 'de', targetLangs: ['en'], text: 'Wort '.repeat(120) });
-    expect(
-      (
-        await failure(
-          new MyMemoryProvider({ getEmail: () => undefined, fetchImpl: none.fetch }).translate(tooLong),
-        )
-      ).kind,
-    ).toBe('bad_request');
-    expect(none.calls).toHaveLength(0);
+  it('accepts an Urdu answer that keeps the names of the source in Latin script', async () => {
+    const { fetch } = fakeFetch((call) => {
+      const pair = new URL(call.url).searchParams.get('langpair');
+      return jsonResponse({
+        responseStatus: 200,
+        responseData: {
+          translatedText:
+            pair === 'de|ur' ? 'Microsoft Teams اور SharePoint۔' : 'Microsoft Teams and SharePoint.',
+        },
+      });
+    });
+    const provider = new MyMemoryProvider({ getEmail: () => undefined, fetchImpl: fetch });
+    const result = await provider.translate(
+      mtRequest({ sourceLang: 'de', targetLangs: ['ur', 'en'], text: 'Microsoft Teams und SharePoint.' }),
+    );
+    expect(result.translations).toEqual({
+      ur: 'Microsoft Teams اور SharePoint۔',
+      en: 'Microsoft Teams and SharePoint.',
+    });
+  });
+
+  it('rejects the source handed back untranslated', async () => {
+    const text = 'Wir veröffentlichen nächste Woche die neue Version.';
+    const { fetch } = fakeFetch(() =>
+      jsonResponse({ responseStatus: 200, responseData: { translatedText: text } }),
+    );
+    const provider = new MyMemoryProvider({ getEmail: () => undefined, fetchImpl: fetch });
+    const error = await failure(
+      provider.translate(mtRequest({ sourceLang: 'de', targetLangs: ['en'], text })),
+    );
+    expect(error.kind).toBe('bad_response');
+    expect(error.message).toContain('repeats the source');
+  });
+
+  it('leaves out a caption that failed, and fails when the spoken language failed', async () => {
+    const failing = (pairThatFails: string) =>
+      fakeFetch((call) => {
+        const pair = new URL(call.url).searchParams.get('langpair');
+        if (pair === pairThatFails) return jsonResponse({ error: 'upstream' }, { status: 503 });
+        return jsonResponse({
+          responseStatus: 200,
+          responseData: { translatedText: pair === 'de|ur' ? URDU : ENGLISH },
+        });
+      });
+    const job = () => mtRequest({ sourceLang: 'de', targetLangs: ['ur', 'en'], text: GERMAN });
+
+    const caption = new MyMemoryProvider({ getEmail: () => undefined, fetchImpl: failing('de|en').fetch });
+    // Used to throw, discarding the Urdu translation that was to be spoken.
+    expect(await caption.translate(job())).toEqual({ translations: { ur: URDU } });
+
+    const spoken = new MyMemoryProvider({ getEmail: () => undefined, fetchImpl: failing('de|ur').fetch });
+    expect((await failure(spoken.translate(job()))).kind).toBe('unavailable');
+  });
+
+  it('sends Urdu of 305 characters in one request: the limit counts characters, not bytes', async () => {
+    const urdu =
+      'ہم نے کلائنٹ سے بات کی ہے اور انہوں نے کہا ہے کہ انہیں یہ فیچر اگلے مہینے تک چاہیے اور وہ اس کے لیے اضافی ادائیگی کرنے کو تیار ہیں تو ہمیں اپنی ٹیم کے ساتھ بیٹھ کر یہ دیکھنا ہوگا کہ ہم یہ کام کتنے وقت میں مکمل کر سکتے ہیں اور اس کے لیے ہمیں کتنے لوگوں کی ضرورت ہوگی اور کیا ہمیں باہر سے کسی کو لینا پڑے گا';
+    expect(new TextEncoder().encode(urdu).byteLength).toBeGreaterThan(500);
+    const { fetch, calls } = fakeFetch(() =>
+      jsonResponse({ responseStatus: 200, responseData: { translatedText: GERMAN } }),
+    );
+    const provider = new MyMemoryProvider({ getEmail: () => undefined, fetchImpl: fetch });
+    // Used to be refused locally with "text is too long".
+    expect(await provider.translate(mtRequest({ targetLangs: ['de'], text: urdu }))).toEqual({
+      translations: { de: GERMAN },
+    });
+    expect(calls).toHaveLength(1);
+    expect(new URL(must(calls[0]).url).searchParams.get('q')).toBe(urdu);
+  });
+
+  it('translates longer text sentence by sentence, in order, and joins the pieces', async () => {
+    const sentences = Array.from(
+      { length: 9 },
+      (_, i) => `Dies ist der Satz Nummer ${i + 1} einer längeren Erklärung, die kein Ende nimmt.`,
+    );
+    const text = sentences.join(' ');
+    expect(text.length).toBeGreaterThan(500);
+
+    const pieces = queryPieces(text, 'de');
+    expect(pieces.length).toBeGreaterThan(1);
+    expect(pieces.join(' ')).toBe(text);
+    for (const piece of pieces) {
+      expect(piece.length).toBeLessThanOrEqual(500);
+      expect(piece.endsWith('.')).toBe(true);
+    }
+
+    let inFlight = 0;
+    let overlap = false;
+    const { fetch, calls } = fakeFetch(async (call) => {
+      inFlight += 1;
+      overlap ||= inFlight > 1;
+      await Promise.resolve();
+      inFlight -= 1;
+      const q = new URL(call.url).searchParams.get('q') ?? '';
+      return jsonResponse({ responseStatus: 200, responseData: { translatedText: `[${q.length}]` } });
+    });
+    const provider = new MyMemoryProvider({ getEmail: () => undefined, fetchImpl: fetch });
+    const result = await provider.translate(mtRequest({ sourceLang: 'de', targetLangs: ['en'], text }));
+
+    expect(calls.map((call) => new URL(call.url).searchParams.get('q'))).toEqual(pieces);
+    expect(result.translations.en).toBe(pieces.map((piece) => `[${piece.length}]`).join(' '));
+    expect(overlap).toBe(false);
+  });
+
+  it('cuts a single sentence that is too long at a clause break or a space', () => {
+    const noStops = 'Wort '.repeat(120).trim();
+    const pieces = queryPieces(noStops, 'de');
+    expect(pieces.length).toBe(2);
+    expect(pieces.join(' ')).toBe(noStops);
+    for (const piece of pieces) expect(piece.length).toBeLessThanOrEqual(500);
+    expect(queryPieces('  Guten   Morgen. ', 'de')).toEqual(['Guten Morgen.']);
   });
 });
 
@@ -556,7 +965,11 @@ describe('Azure voices', () => {
       key: 'abc123',
     });
     expect(parseAzureCredentials('abc123', undefined)).toBeUndefined();
-    expect(parseAzureCredentials('bad region:abc', undefined)).toBeUndefined();
+    // The portal writes regions with a space and capitals; anything else is not a region.
+    expect(parseAzureCredentials('West Europe:abc', undefined)).toEqual({ region: 'westeurope', key: 'abc' });
+    expect(parseAzureCredentials('abc123', 'West Europe')).toEqual({ region: 'westeurope', key: 'abc123' });
+    expect(parseAzureCredentials('bad/region:abc', undefined)).toBeUndefined();
+    expect(parseAzureCredentials('abc123', 'west-europe!')).toBeUndefined();
     expect(parseAzureCredentials(undefined, 'westeurope')).toBeUndefined();
   });
 

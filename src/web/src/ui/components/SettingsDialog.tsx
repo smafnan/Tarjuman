@@ -14,6 +14,7 @@ import { PAUSE_MS_MAX, PAUSE_MS_MIN } from '../../state/types';
 import { controller } from '../controller';
 import { errorMessage } from '../lib/format';
 import { PROVIDER_KIND_LABEL } from '../lib/providers';
+import { nextTab } from '../lib/tabs';
 import { Segmented, SelectField, Slider, Spinner, Switch } from './controls';
 import { Dialog } from './Dialog';
 
@@ -228,6 +229,11 @@ function KeysTab() {
           This server does not accept keys from the browser. Set them in its environment (.env file) instead.
         </p>
       ) : null}
+      {keys.problems.map((problem) => (
+        <p key={problem} className="field__note field__note--warn" role="alert">
+          {problem}
+        </p>
+      ))}
       {keys.keys.map((status) => (
         <KeyCard key={status.name} status={status} writable={keys.writable} onSaved={setKeys} />
       ))}
@@ -555,7 +561,22 @@ export function SettingsDialog({ open, tab, onTabChange, onClose, overlay }: Set
         </>
       }
     >
-      <div className="tabs" role="tablist" aria-label="Settings sections">
+      <div
+        className="tabs"
+        role="tablist"
+        aria-label="Settings sections"
+        onKeyDown={(event) => {
+          const next = nextTab(
+            TABS.map((item) => item.id),
+            tab,
+            event.key,
+          );
+          if (next === null) return;
+          event.preventDefault();
+          onTabChange(next);
+          document.getElementById(`settings-tab-${next}`)?.focus();
+        }}
+      >
         {TABS.map((item) => (
           <button
             key={item.id}
@@ -564,6 +585,7 @@ export function SettingsDialog({ open, tab, onTabChange, onClose, overlay }: Set
             className="tab"
             id={`settings-tab-${item.id}`}
             aria-selected={tab === item.id}
+            tabIndex={tab === item.id ? 0 : -1}
             aria-controls="settings-panel"
             onClick={() => onTabChange(item.id)}
           >

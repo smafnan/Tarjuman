@@ -50,6 +50,8 @@ export interface KeysResponse {
   keys: KeyStatus[];
   /** False when the server refuses to store keys (hosted deployments). */
   writable: boolean;
+  /** Plain sentences about the saved keys that the user should act on (a file that is not private). */
+  problems: string[];
   /** Provider status after applying the keys. */
   info: ServerInfo;
 }

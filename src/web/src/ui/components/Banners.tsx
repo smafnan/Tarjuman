@@ -1,6 +1,7 @@
 import { TriangleAlert } from 'lucide-react';
 
 import { useAppStore } from '../../state/store';
+import { controller } from '../controller';
 import { chainUsable } from '../lib/providers';
 
 /** Page-wide conditions that keep the product from doing its job. */
@@ -9,6 +10,9 @@ export function Banners({ onOpenKeys }: { onOpenKeys: () => void }) {
   const sttUsable = useAppStore((state) => chainUsable(state.providers.stt));
   const disconnected = useAppStore((state) => state.connection === 'disconnected');
   const canChooseOutput = useAppStore((state) => state.devices.canChooseOutput);
+  const audioBlocked = useAppStore(
+    (state) => state.channels.outgoing.outputBlocked || state.channels.incoming.outputBlocked,
+  );
   const devicesKnown = useAppStore((state) => state.devices.inputs.length + state.devices.outputs.length > 0);
 
   return (
@@ -17,6 +21,20 @@ export function Banners({ onOpenKeys }: { onOpenKeys: () => void }) {
         <div className="banner banner--danger" role="alert">
           <TriangleAlert size={18} aria-hidden="true" />
           <span className="banner__text">Cannot reach the Tarjuman server. Is it running?</span>
+        </div>
+      ) : null}
+      {audioBlocked ? (
+        <div className="banner banner--danger" role="alert">
+          <TriangleAlert size={18} aria-hidden="true" />
+          <span className="banner__text">Translated speech cannot be played: the audio device stopped.</span>
+          {/* Called directly in the click handler: browsers only restart audio in response to a click. */}
+          <button
+            type="button"
+            className="button button--primary button--small"
+            onClick={() => void controller().resumeAudio()}
+          >
+            Resume audio
+          </button>
         </div>
       ) : null}
       {serverKnown && !sttUsable ? (

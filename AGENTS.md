@@ -55,13 +55,19 @@ The repository owner, GitHub user `smafnan`, is the only author and contributor.
 ```
 npm run dev        # server on :8787 (watch) + web on :5173
 npm run check      # typecheck + lint + unit tests
-npm run test:e2e   # browser tests (builds first, uses mock providers)
+npm run test:e2e   # browser tests (builds first, uses mock providers); once: npx playwright install chromium
 npm run doctor     # test every configured provider with one real request
 npm run build && npm start
+npm run start:mock # the built server with offline fakes instead of providers
 ```
 
-`TARJUMAN_MOCK=1` replaces all providers with offline fakes; `http://localhost:5173/?demo=1`
-shows the interface filled with sample data.
+`npm run start:mock` (or `TARJUMAN_MOCK=1` in `.env`) replaces all providers with offline
+fakes; it works in every shell, which `TARJUMAN_MOCK=1 npm start` does not (PowerShell and
+cmd.exe set variables differently). `http://localhost:5173/?demo=1` shows the interface
+filled with sample data.
+
+Commands in documents and scripts must work in PowerShell and cmd.exe as well as in a POSIX
+shell: use npm scripts or Node scripts instead of `NAME=value command`.
 
 ## Recipes
 

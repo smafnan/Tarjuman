@@ -108,6 +108,10 @@ interface FakeService {
   upgrades: IncomingMessage[];
   /** Text frames received from the client on the most recent connection. */
   received: string[];
+  /** Connections that are open right now. */
+  clients(): number;
+  /** Close every open connection, as the real service does with idle ones. */
+  dropClients(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -149,6 +153,10 @@ async function fakeService(
     url: `ws://127.0.0.1:${port}/consumer/speech/synthesize/readaloud/edge/v1`,
     upgrades,
     received,
+    clients: () => server.clients.size,
+    dropClients: async () => {
+      for (const client of server.clients) client.terminate();
+    },
     close: () =>
       new Promise((resolve) => {
         for (const client of server.clients) client.terminate();
@@ -267,11 +275,13 @@ describe('EdgeTtsProvider against a local service', () => {
     expect(service.upgrades).toHaveLength(2);
   });
 
-  it('treats a turn that ends without audio as a bad response and does not retry', async () => {
+  it('treats a turn that ends without audio as a fault of that request and does not retry', async () => {
+    // What the service answers to text it finds nothing to say in ("..."). One such request
+    // must not rest the only keyless voice the way an outage does.
     service = await fakeService((socket) => socket.send('X-RequestId:abc\r\nPath:turn.end\r\n\r\n{}'));
     const provider = new EdgeTtsProvider({ endpoint: service.url });
     const error = await provider.synthesize(request()).catch((e: unknown) => e);
-    expect((error as ProviderError).kind).toBe('bad_response');
+    expect((error as ProviderError).kind).toBe('bad_request');
     expect(service.upgrades).toHaveLength(1);
   });
 
@@ -294,5 +304,153 @@ describe('EdgeTtsProvider against a local service', () => {
     const error = await provider.synthesize(request({ text: '   ' })).catch((e: unknown) => e);
     expect((error as ProviderError).kind).toBe('bad_request');
     expect(service.upgrades).toHaveLength(0);
+  });
+
+  it('does not open a connection for a request that is already aborted', async () => {
+    service = await fakeService(speakNormally);
+    const provider = new EdgeTtsProvider({ endpoint: service.url });
+    const error = await provider
+      .synthesize(request({ signal: AbortSignal.abort() }))
+      .catch((e: unknown) => e);
+    expect((error as ProviderError).kind).toBe('aborted');
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(service.upgrades).toHaveLength(0);
+  });
+});
+
+describe('EdgeTtsProvider: a connection opened ahead of the request', () => {
+  let service: FakeService | undefined;
+  let provider: EdgeTtsProvider | undefined;
+  afterEach(async () => {
+    provider?.close();
+    provider = undefined;
+    await service?.close();
+    service = undefined;
+  });
+
+  const until = async (condition: () => boolean) => {
+    for (let i = 0; i < 400 && !condition(); i++) await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(condition()).toBe(true);
+  };
+
+  it('is opened by prepare(), configured at once, and then used for the request', async () => {
+    service = await fakeService(speakNormally);
+    const opened = service;
+    provider = new EdgeTtsProvider({ endpoint: service.url });
+
+    provider.prepare();
+    await until(() => opened.received.length === 1);
+    expect(opened.upgrades).toHaveLength(1);
+    expect(opened.received[0]).toContain('Path:speech.config');
+
+    const result = await provider.synthesize(request());
+    expect(Buffer.from(result.audio).toString()).toBe('first-second');
+    // No second handshake: the request went out on the connection that was waiting.
+    expect(opened.upgrades).toHaveLength(1);
+    expect(opened.received[1]).toContain('Path:ssml');
+  });
+
+  it('is used even when the request arrives before the handshake has finished', async () => {
+    service = await fakeService(speakNormally);
+    provider = new EdgeTtsProvider({ endpoint: service.url });
+    provider.prepare();
+    const result = await provider.synthesize(request());
+    expect(Buffer.from(result.audio).toString()).toBe('first-second');
+    expect(service.upgrades).toHaveLength(1);
+  });
+
+  it('is opened once however often prepare() is called, and serves one request only', async () => {
+    service = await fakeService(speakNormally);
+    const opened = service;
+    provider = new EdgeTtsProvider({ endpoint: service.url });
+    provider.prepare();
+    provider.prepare();
+    provider.prepare();
+    await until(() => opened.received.length === 1);
+    expect(opened.upgrades).toHaveLength(1);
+
+    await provider.synthesize(request());
+    await provider.synthesize(request());
+    expect(opened.upgrades).toHaveLength(2);
+  });
+
+  it('is replaced when the request is announced again after it has waited a while', async () => {
+    service = await fakeService(speakNormally);
+    const opened = service;
+    let time = Date.UTC(2026, 10, 11, 9, 0, 0);
+    provider = new EdgeTtsProvider({ endpoint: service.url, now: () => time });
+
+    // A long sentence: announced when it starts ...
+    provider.prepare();
+    await until(() => opened.received.length === 1);
+    // ... and again when it arrives, 15 s later. The connection from its start would expire
+    // while the sentence is still being recognized and translated.
+    time += 15_500;
+    provider.prepare();
+    await until(() => opened.upgrades.length === 2);
+
+    time += 5_000;
+    await provider.synthesize(request());
+    expect(opened.upgrades).toHaveLength(2);
+  });
+
+  it('is not used once it has waited too long', async () => {
+    service = await fakeService(speakNormally);
+    const opened = service;
+    let time = Date.UTC(2026, 10, 11, 9, 0, 0);
+    provider = new EdgeTtsProvider({ endpoint: service.url, now: () => time });
+    provider.prepare();
+    await until(() => opened.received.length === 1);
+
+    time += 21_000;
+    const result = await provider.synthesize(request());
+    expect(Buffer.from(result.audio).toString()).toBe('first-second');
+    expect(opened.upgrades).toHaveLength(2);
+  });
+
+  it('is replaced by a fresh connection when the service has closed it in the meantime', async () => {
+    service = await fakeService(speakNormally);
+    const opened = service;
+    provider = new EdgeTtsProvider({ endpoint: service.url });
+    provider.prepare();
+    await until(() => opened.received.length === 1);
+    // The far side gives the idle connection up.
+    await opened.dropClients();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    const result = await provider.synthesize(request());
+    expect(Buffer.from(result.audio).toString()).toBe('first-second');
+    expect(opened.upgrades).toHaveLength(2);
+
+    // prepare() notices a dead standby as well and opens a new one.
+    provider.prepare();
+    await until(() => opened.upgrades.length === 3);
+  });
+
+  it('learns the server clock from a rejected standby, so the request itself succeeds at once', async () => {
+    const serverDate = new Date(Date.UTC(2026, 10, 11, 12, 0, 0));
+    service = await fakeService(speakNormally, { rejectFirst: 1, date: serverDate });
+    const opened = service;
+    const localTime = Date.UTC(2026, 10, 11, 9, 0, 0);
+    provider = new EdgeTtsProvider({ endpoint: service.url, now: () => localTime });
+
+    provider.prepare();
+    await until(() => opened.upgrades.length === 1);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    await provider.synthesize(request());
+    expect(opened.upgrades).toHaveLength(2);
+    const query = new URL(opened.upgrades[1]?.url ?? '', 'ws://x').searchParams;
+    expect(query.get('Sec-MS-GEC')).toBe(secMsGecV2(serverDate.getTime() / 1000));
+  });
+
+  it('gives the connection up when the provider is closed', async () => {
+    service = await fakeService(speakNormally);
+    const opened = service;
+    provider = new EdgeTtsProvider({ endpoint: service.url });
+    provider.prepare();
+    await until(() => opened.received.length === 1);
+    provider.close();
+    await until(() => opened.clients() === 0);
   });
 });

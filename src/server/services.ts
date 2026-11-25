@@ -17,6 +17,7 @@ import { GeminiAudioSttProvider, GeminiMtProvider, GemmaMtProvider } from './pro
 import { MockMtProvider, MockSttProvider, MockTtsProvider } from './providers/mock';
 import { MyMemoryProvider } from './providers/mt/myMemory';
 import { OpenAiCompatMtProvider } from './providers/mt/openaiCompat';
+import { createHttpClient, proxyUrl, type HttpClient } from './providers/net';
 import { GroqWhisperProvider } from './providers/stt/groqWhisper';
 import { AzureTtsProvider } from './providers/tts/azure';
 import { EdgeTtsProvider } from './providers/tts/edge';
@@ -36,7 +37,7 @@ export const KEY_DEFINITIONS: KeyDefinition[] = [
     label: 'Groq',
     description:
       'Speech recognition (Whisper large-v3) and fast translation models. Free tier, no credit card. ' +
-      'This is the one key Tarjuman needs to understand speech.',
+      'Fast and accurate for German and English, and the fallback for Urdu.',
     signupUrl: 'https://console.groq.com/keys',
     recommended: true,
   },
@@ -44,7 +45,7 @@ export const KEY_DEFINITIONS: KeyDefinition[] = [
     name: 'GEMINI_API_KEY',
     label: 'Google AI Studio (Gemini)',
     description:
-      'Most accurate Urdu: hears the audio and translates in one step. Free tier, no credit card. ' +
+      'Most accurate Urdu: hears the audio and translates in one step. Enough by itself to understand speech. Free tier, no credit card. ' +
       "Note: Google's terms require its paid tier for applications offered to users in the EEA, the UK and Switzerland; check them before relying on the free tier there.",
     signupUrl: 'https://aistudio.google.com/apikey',
     recommended: true,
@@ -96,6 +97,20 @@ const ONE_CALL_TRANSLATOR = 'gemini-flash-lite';
  */
 const MULTIMODAL_FIRST: ReadonlySet<LangCode> = new Set(['ur']);
 
+/** Start a second recognizer alongside the first when it has not answered after this long. */
+const STT_HEDGE_MS = 2_500;
+/**
+ * The recognizer that also translates replaces two requests, and for Urdu its transcript is
+ * the better one by far. Starting Whisper next to it too early throws that answer away for a
+ * weaker one that still needs a translation afterwards, so it gets a second longer.
+ */
+const ONE_CALL_HEDGE_MS = 3_500;
+/**
+ * ... and more for a longer utterance: it has to write the transcript and every translation,
+ * so its answer grows with what was said (Whisper's time hardly does).
+ */
+const ONE_CALL_HEDGE_PER_AUDIO_MS = 0.12;
+
 function list(value: string | undefined): string[] {
   return (value ?? '')
     .split(',')
@@ -124,7 +139,14 @@ interface ProviderSet {
   tts: TtsProvider[];
 }
 
-function buildProviders(keys: KeyStore, env: NodeJS.ProcessEnv, mock: boolean): ProviderSet {
+function buildProviders(
+  keys: KeyStore,
+  env: NodeJS.ProcessEnv,
+  mock: boolean,
+  http: HttpClient,
+): ProviderSet {
+  // One client for all of them: connections are kept open between sentences and opened ahead.
+  const net = { fetchImpl: http.fetch, warm: http.warm };
   if (mock) {
     return { stt: [new MockSttProvider()], mt: [new MockMtProvider()], tts: [new MockTtsProvider()] };
   }
@@ -138,15 +160,15 @@ function buildProviders(keys: KeyStore, env: NodeJS.ProcessEnv, mock: boolean): 
   const groqMtModels = list(env.GROQ_MT_MODELS).length > 0 ? list(env.GROQ_MT_MODELS) : DEFAULTS.groqMtModels;
 
   const stt: SttProvider[] = [
-    new GeminiAudioSttProvider({ getKey: geminiKey, models: geminiModels }),
+    new GeminiAudioSttProvider({ getKey: geminiKey, models: geminiModels, ...net }),
     ...groqSttModels.map(
-      (model) => new GroqWhisperProvider({ id: `groq-${slug(model)}`, model, getKey: groqKey }),
+      (model) => new GroqWhisperProvider({ id: `groq-${slug(model)}`, model, getKey: groqKey, ...net }),
     ),
   ];
 
   const mt: MtProvider[] = [
-    new GeminiMtProvider({ getKey: geminiKey, models: geminiModels }),
-    new GemmaMtProvider({ getKey: geminiKey, models: gemmaModels }),
+    new GeminiMtProvider({ getKey: geminiKey, models: geminiModels, ...net }),
+    new GemmaMtProvider({ getKey: geminiKey, models: gemmaModels, ...net }),
     ...groqMtModels.map(
       (model) =>
         new OpenAiCompatMtProvider({
@@ -160,6 +182,7 @@ function buildProviders(keys: KeyStore, env: NodeJS.ProcessEnv, mock: boolean): 
           reasoning: groqReasoning(model),
           // Free tier: 30 requests/min but only 8,000 tokens/min, i.e. roughly 14 of our requests.
           requestsPerMinute: 14,
+          ...net,
         }),
     ),
     new OpenAiCompatMtProvider({
@@ -172,17 +195,19 @@ function buildProviders(keys: KeyStore, env: NodeJS.ProcessEnv, mock: boolean): 
       // Local servers (Ollama, LM Studio) need no key; the endpoint decides.
       requiresKey: false,
       timeoutMs: 12_000,
+      ...net,
     }),
-    new MyMemoryProvider({ getEmail: () => env.MYMEMORY_EMAIL?.trim() || undefined }),
+    new MyMemoryProvider({ getEmail: () => env.MYMEMORY_EMAIL?.trim() || undefined, ...net }),
   ];
 
   const tts: TtsProvider[] = [
     new AzureTtsProvider({
       getKey: () => keys.get('AZURE_SPEECH_KEY'),
       getRegion: () => env.AZURE_SPEECH_REGION,
+      ...net,
     }),
     // Node's WebSocket client does not pick up a proxy from the environment by itself.
-    new EdgeTtsProvider({ proxyUrl: env.HTTPS_PROXY?.trim() || env.https_proxy?.trim() || undefined }),
+    new EdgeTtsProvider({ proxyUrl: proxyUrl(env.https_proxy?.trim() || env.HTTPS_PROXY?.trim() || '') }),
   ];
 
   return { stt, mt, tts };
@@ -252,7 +277,8 @@ async function probe(provider: AnyProvider): Promise<DiagnosticResult> {
       ...base,
       outcome: 'skipped',
       ms: 0,
-      detail: provider.requiresKey ? 'API key not set' : 'not configured',
+      detail:
+        provider.unconfiguredReason?.() ?? (provider.requiresKey ? 'API key not set' : 'not configured'),
     };
   }
   const signal = AbortSignal.timeout(DIAGNOSTIC_TIMEOUT_MS);
@@ -324,8 +350,9 @@ export async function createServices(
     notifyTimer.unref?.();
   };
 
-  const providers = buildProviders(keys, env, config.mock);
-  const warnings: string[] = [];
+  const http = createHttpClient({ env });
+  const providers = buildProviders(keys, env, config.mock, http);
+  const warnings: string[] = [...http.problems];
   const chain = <P extends ProviderBase>(kind: ProviderKind, all: P[], variable: string) => {
     // The mock providers stand in for everything; a production provider list does not apply to them.
     const selection = selectProviders(all, config.mock ? undefined : config.providerOrder[kind]);
@@ -353,6 +380,10 @@ export async function createServices(
   // MT_PROVIDERS list that is only acceptable when the list includes the same model.
   const mtList = config.mock ? undefined : config.providerOrder.mt;
   const recognizerMayTranslate = !mtList?.length || mtList.includes(ONE_CALL_TRANSLATOR);
+  const sttHedgeMs = (provider: SttProvider, audioMs: number): number =>
+    recognizerMayTranslate && provider.id === ONE_CALL_RECOGNIZER
+      ? ONE_CALL_HEDGE_MS + Math.round(audioMs * ONE_CALL_HEDGE_PER_AUDIO_MS)
+      : STT_HEDGE_MS;
 
   // New keys deserve a fresh start: forget "key rejected" states and cooldowns.
   keys.onChange(() => {
@@ -374,8 +405,11 @@ export async function createServices(
   return {
     config,
     keys,
-    chains: { stt, mt, tts, sttRank, recognizerMayTranslate },
-    warnings,
+    chains: { stt, mt, tts, sttRank, recognizerMayTranslate, sttHedgeMs },
+    // Read when asked: a problem with the key file can also turn up later, when a key is saved.
+    get warnings() {
+      return [...warnings, ...keys.problems];
+    },
     providerStatus,
     voices,
     info: () => ({

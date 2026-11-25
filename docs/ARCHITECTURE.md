@@ -26,7 +26,9 @@ sequenceDiagram
   participant B as Browser (audio engine)
   participant S as Server (pipeline)
   participant P as Providers
-  B->>B: VAD: speech frames → utterance (2–15 s)
+  B->>B: VAD: speech frames → utterance (0.16–15 s of speech)
+  B->>S: speech.start hint (protocol v2)
+  S->>P: open connections that will be needed
   B->>S: binary frame: header + 16 kHz PCM
   par recognition starts immediately
     S->>P: speech recognition (hedged fallback chain)
@@ -71,7 +73,17 @@ instructions and its free quota is not published.
   - after 9 s of continuous speech a breath (260 ms) is enough;
   - at 15 s the speech is cut at the quietest recent frame and continues in a new utterance,
     flagged as a fragment so the translator does not "complete" the sentence;
-  - 320 ms of audio before the first speech frame is kept, so word onsets are not clipped.
+  - 320 ms of audio before the first speech frame is kept, so word onsets are not clipped;
+  - 160 ms of detected speech is enough for an utterance, so a one-word answer ("Ja.",
+    "جی") is not lost.
+
+The speech detector runs in a 16 kHz audio context, so the conversion from the device's
+sample rate is done by the browser. The detection library's own converter is not used: it
+lets frequencies above 8 kHz fold back into the speech band, and that audio is what the
+recognizer would hear.
+When somebody starts to speak, the browser sends a `speech.start` hint (wire protocol
+version 2) so that the server can open its connections to the providers before the
+utterance is finished.
 
 Only audio containing speech is sent. This is what makes free speech-recognition quotas
 sufficient, and it keeps recognizers from inventing text for silence.
@@ -86,8 +98,13 @@ One `OutputBus` per destination, each an `AudioContext` routed with `setSinkId`:
 | incoming | headphones         | their translation, optionally their original voice underneath (ducked) |
 | monitor  | headphones         | a quiet copy of your own translation, if you want to hear it           |
 
-Speech chunks are decoded in arrival order and scheduled back to back on the context's
-clock, so playback is gapless and independent of timers. The reported queue length feeds
+Speech chunks are decoded in arrival order and scheduled on the context's clock, so
+playback is independent of timers. The voice service puts silence around every sentence
+(about 0.2 s before, 0.8 to 1.4 s after); the browser trims it and inserts a short,
+deliberate pause between sentences instead. The translated voice is routed to the chosen
+device again after a microphone permission that was granted "this time" only. If the audio
+device stops (a headset is unplugged), a banner says so and **Resume audio** restarts it;
+browsers allow that only in response to a click. The reported queue length feeds
 back to the server, which speaks faster when the interpreter falls behind.
 
 ### Feedback control (`app/controller.ts`)
@@ -95,10 +112,13 @@ back to the server, which speaks faster when the interpreter falls behind.
 A capture channel has a gate. While closed, its input is treated as silence.
 
 - Without headphones the microphone gate closes while any translated speech is audible in
-  the room, and reopens 300 ms after it ends.
+  the room, and reopens 600 ms after its last sample has left the device (the output
+  latency of the device is counted in).
 - When the whole system's audio is shared and the browser cannot exclude this page's own
   audio, the incoming gate closes while Tarjuman is speaking.
-- In push-to-talk mode the microphone gate is closed unless the key is held.
+- In push-to-talk mode the microphone gate is closed unless the key (Space) is held. The
+  key is read from the Tarjuman window, so it works after clicking a button, but only while
+  that window has focus: Space held while Teams is in front goes to Teams.
 
 Nothing on this path uses timers: browsers slow timers to once per second, or minute, when
 a window is hidden, and Tarjuman is by design hidden behind Teams. The gate delay is
@@ -108,7 +128,9 @@ measured against the audio frames themselves.
 
 One store (zustand). The controller is its only writer; React components read it with
 narrow selectors and call controller methods. `state/types.ts` is the contract between
-the two halves.
+the two halves. In a narrow window (980 px wide or less, or 720 px high or less) the two
+channel panels sit in a strip above the conversation and their device, voice and Advanced
+controls are folded behind a **Devices and voice** button.
 
 ## Server
 
@@ -118,16 +140,22 @@ Three interfaces, `SttProvider`, `MtProvider`, `TtsProvider` (`types.ts`). Provi
 stateless and classify every failure as a `ProviderError` kind. `FallbackChain` (`chain.ts`)
 owns everything that makes free tiers usable in a live conversation:
 
-| Situation                 | Reaction                                                                                              |
-| ------------------------- | ----------------------------------------------------------------------------------------------------- |
-| No key                    | provider is skipped                                                                                   |
-| Rate limited              | cooldown for the time the provider asks for, next provider answers                                    |
-| Per-minute budget used up | skipped before it can answer 429                                                                      |
-| Timeout or server error   | exponential cooldown, 5 s → 60 s                                                                      |
-| Key rejected              | disabled until keys change                                                                            |
-| Repeated "bad request"    | assumed misconfigured (retired model), rested for a minute                                            |
-| Slow answer               | _hedging_: after about 2.5 s the next provider is started in parallel and the first valid answer wins |
-| Everything resting        | the provider that recovers soonest is tried anyway                                                    |
+| Situation                                             | Reaction                                                                                                                                                             |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| No key                                                | provider is skipped                                                                                                                                                  |
+| Rate limited                                          | cooldown for the time the provider asks for, next provider answers                                                                                                   |
+| Per-minute budget used up                             | skipped before it can answer 429                                                                                                                                     |
+| Timeout or server error                               | exponential cooldown, 5 s → 60 s                                                                                                                                     |
+| Keeps answering slowly                                | rested (30 s, doubling up to 2 min) after two requests in a row that the fallback, started later, answered first                                                     |
+| Key rejected                                          | disabled until keys change                                                                                                                                           |
+| Repeated "bad request"                                | assumed misconfigured (retired model), rested for a minute                                                                                                           |
+| Slow answer                                           | _hedging_: after about 2.5 s the next provider is started in parallel and the first valid answer wins; the recognizer that also translates (Gemini audio) gets 3.5 s |
+| Everything resting, or the only usable provider fails | one resting provider is tried as a last resort                                                                                                                       |
+| Voice service timed out                               | the voice step fails fast; the caption is already on screen                                                                                                          |
+
+A rest that a provider asked for itself (a rate limit) is never shortened or lifted by an
+unrelated request. Each provider also has a per-minute budget that Tarjuman keeps to by
+itself; see [PROVIDERS.md](PROVIDERS.md).
 
 Per-language preference is applied per request: for Urdu the multimodal model is tried
 first, for German and English Whisper.
@@ -160,32 +188,53 @@ utterance N+1     [ STT ]─────▶[ translate ]────▶[ synthes
 - Translation runs in arrival order per channel (the _text lane_): each sentence is context
   for the next.
 - Synthesis runs in order on a second lane, so translating sentence N+1 never waits for the
-  audio of sentence N. Within an utterance, sentence _i+1_ is synthesized while _i_ is sent.
+  audio of sentence N. The first sentence of a translation is synthesized and sent on its
+  own; the rest follows while it plays. A translation that would be spoken more than 15 s
+  late is not spoken; the caption stays and is marked as not spoken.
+- The voice needs a connection to the voice service. Idle connections to the providers are
+  kept for a minute (Node closes them after 4 s by default, which cost a TLS handshake of
+  230 to 320 ms on nearly every request), and the `speech.start` hint opens the ones that
+  will be needed. On the keyless voice a sentence took about 1.0 to 1.5 s with a new
+  connection per request and about 0.4 s with the connection opened ahead.
 - The two channels share nothing but the conversation memory (the last few turns, in RAM
   only), so one direction cannot hold up the other.
 - Every failure becomes exactly one event for that utterance. A voice failure still
-  delivers the caption.
+  delivers the caption. English captions are optional: a missing one does not discard the
+  spoken translation.
 
 Before anything is spoken, `hallucination.ts` checks the transcript: Whisper's own
 no-speech rule, a confidence floor, repetition loops, known artefacts ("Untertitel der
 Amara.org-Community"), wrong script for the channel, an echoed prompt, stock phrases on
-weak audio, and more text than the audio could hold. The patterns are deliberately narrow,
-because this tool is used to talk about subtitles and translation.
+weak audio, and more text than the audio could hold. Recognizer boilerplate is removed
+sentence by sentence instead of dropping the whole utterance, text in parentheses that
+people really said is kept, and a real one-word answer ("Ja.", "جی") is not dropped on
+ordinary confidence. The patterns are deliberately narrow, because this tool is used to
+talk about subtitles and translation.
 
 ### Transport and security (`http/`)
 
 - JSON text frames for events; binary frames (`[length][JSON header][payload]`) for audio in
   both directions. Everything from the browser is validated before it reaches the pipeline.
+  The wire protocol is at version 2 (`PROTOCOL_VERSION` in `src/shared/protocol.ts`); version
+  2 added the `speech.start` hint.
 - The server listens on 127.0.0.1 by default. A local server is reachable by every web page
   the user visits, so requests are checked for same origin and for a loopback `Host`
   (against cross-site requests and DNS rebinding).
 - Any other listen address requires `ACCESS_TOKEN`; the server refuses to start without it.
-- API keys live on the server (environment first, then `data/keys.json`, mode 0600) and are
-  never sent to the browser; only masked hints are.
+- API keys live on the server (environment first, then `data/keys.json`) and are never sent
+  to the browser; only masked hints are. The file is restricted to the current account when
+  it is saved: mode 0600 on Linux and macOS, an access-control list (`icacls`) on Windows.
 - The page is served with a strict Content-Security-Policy and loads nothing from third
   parties: fonts, the VAD model and the ONNX runtime are bundled.
 - Transcripts and translations are not logged unless `LOG_TRANSCRIPTS=1`; request URLs are
   logged without their query string.
+- The server uses its own HTTP client for the providers. It honours `HTTPS_PROXY`,
+  `HTTP_PROXY` and `NO_PROXY`, including values set in `.env`, on every supported Node
+  version. Only `NODE_EXTRA_CA_CERTS` (for a proxy that inspects TLS) has to be set in the
+  real environment, because Node reads it at start-up.
+- `.env`, the data folder and the built web app are found relative to the project folder,
+  whatever the current directory is. A `.env` saved by Windows PowerShell 5.1 (UTF-16) is
+  read correctly.
 - Behind a reverse proxy the Host header no longer identifies the site, so `PUBLIC_ORIGIN`
   names the one origin requests may come from.
 

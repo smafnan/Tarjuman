@@ -128,6 +128,12 @@ export interface ChannelRuntime {
   sinkLabel: string | null;
   /** False when the chosen output device could not be selected and the default is used. */
   sinkOk: boolean;
+  /**
+   * True when translated speech cannot be played at all: the audio device stopped (headset
+   * unplugged, driver restart) and the browser did not let playback resume by itself.
+   * `AppController.resumeAudio()`, called from a click, tries again.
+   */
+  outputBlocked: boolean;
 }
 
 export type EntryStatus = 'transcribing' | 'translating' | 'speaking' | 'done' | 'dropped' | 'error';
@@ -239,6 +245,8 @@ export interface AppController {
 
   /** Stop and discard translated speech that is queued or playing ("skip to live"). */
   flushPlayback(channel: ChannelId): void;
+  /** Get audio playback going again after `outputBlocked`. Must be called from a click handler. */
+  resumeAudio(): Promise<void>;
 
   /**
    * Synthesize a short phrase in the channel's target language and play it on the channel's

@@ -1,6 +1,7 @@
 import type { DiagnosticsReport, KeysResponse } from '../../../shared/api';
 import type { ProviderStatus, ServerInfo } from '../../../shared/protocol';
 import {
+  clearTranscript,
   dismissNotice,
   initialChannelRuntime,
   mergeDeep,
@@ -45,7 +46,7 @@ function provider(
 
 const SERVER: ServerInfo = {
   name: 'tarjuman',
-  version: '0.1.0',
+  version: '2.0.0',
   protocol: 1,
   keysWritable: true,
   authRequired: false,
@@ -207,6 +208,7 @@ const TRANSCRIPT: TranscriptEntry[] = [
 
 const KEYS: KeysResponse = {
   writable: true,
+  problems: [],
   info: SERVER,
   keys: [
     {
@@ -311,8 +313,15 @@ function standIn(): AppController {
     unlockDeviceLabels: later,
     refreshDevices: later,
     flushPlayback: nothing,
+    resumeAudio: async () =>
+      useAppStore.setState((state) => ({
+        channels: {
+          outgoing: { ...state.channels.outgoing, outputBlocked: false },
+          incoming: { ...state.channels.incoming, outputBlocked: false },
+        },
+      })),
     playTestPhrase: later,
-    clearTranscript: () => useAppStore.setState({ transcript: [] }),
+    clearTranscript: () => clearTranscript(),
     exportTranscript: nothing,
     resetContext: nothing,
     getKeys: async () => KEYS,
@@ -322,8 +331,14 @@ function standIn(): AppController {
   };
 }
 
+/** Extra demo states for looking at them: `?demo=1&state=blocked` or `state=toasts`. */
+function demoScenario(): string | null {
+  return new URLSearchParams(globalThis.location?.search ?? '').get('state');
+}
+
 export function loadDemo(): void {
   installStandInController(standIn());
+  const scenario = demoScenario();
   useAppStore.setState((state) => ({
     settings: sanitizeLocalSettings(
       mergeDeep(state.settings, { outgoing: { sinkId: 'cable-in' }, incoming: { sinkId: 'headset-out' } }),
@@ -340,6 +355,7 @@ export function loadDemo(): void {
         level: 0.62,
         pending: 1,
         sinkLabel: 'CABLE Input (VB-Audio Virtual Cable)',
+        outputBlocked: scenario === 'blocked',
       },
       incoming: {
         ...initialChannelRuntime(),
@@ -373,6 +389,22 @@ export function loadDemo(): void {
         message: 'Playing a test phrase on: CABLE Input (VB-Audio Virtual Cable)',
         at: Date.now(),
       },
+      ...(scenario === 'toasts'
+        ? [
+            {
+              id: 'demo-warning',
+              level: 'warning' as const,
+              message: 'Speech recognition is cooling down.',
+              at: Date.now(),
+            },
+            {
+              id: 'demo-error',
+              level: 'error' as const,
+              message: 'Could not reach the translation service.',
+              at: Date.now(),
+            },
+          ]
+        : []),
     ],
   }));
 }

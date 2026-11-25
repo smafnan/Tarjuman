@@ -126,3 +126,51 @@ describe('createServices', () => {
     expect(s.warnings).toEqual([]);
   });
 });
+
+describe('how long a recognizer may take before a second one is started', () => {
+  it('gives the recognizer that also translates a second longer than plain recognizers', async () => {
+    const s = await services({});
+    const [oneCall, whisper] = s.chains.stt.providers;
+    expect(s.chains.sttHedgeMs?.(oneCall!, 0)).toBe(3_500);
+    expect(s.chains.sttHedgeMs?.(whisper!, 0)).toBe(2_500);
+    // It writes the transcript and the translations, so a long utterance takes it longer;
+    // Whisper's time hardly depends on the length.
+    expect(s.chains.sttHedgeMs?.(oneCall!, 10_000)).toBe(4_700);
+    expect(s.chains.sttHedgeMs?.(whisper!, 10_000)).toBe(2_500);
+  });
+
+  it('treats it like any other recognizer when it is not allowed to translate', async () => {
+    const s = await services({ MT_PROVIDERS: 'groq-gpt-oss-120b' });
+    expect(s.chains.recognizerMayTranslate).toBe(false);
+    expect(s.chains.sttHedgeMs?.(s.chains.stt.providers[0]!, 10_000)).toBe(2_500);
+  });
+});
+
+describe('half-configured providers', () => {
+  it('tells an Azure key without a region apart from a missing key, in the status and the diagnostics', async () => {
+    // Only providers that are not set up, so that the diagnostics send nothing anywhere.
+    const s = await services({
+      AZURE_SPEECH_KEY: '0123456789abcdef0123456789abcdef',
+      TTS_PROVIDERS: 'azure',
+      MT_PROVIDERS: 'custom',
+    });
+    expect(s.providerStatus().tts[0]).toMatchObject({
+      id: 'azure',
+      state: 'disabled',
+      detail: expect.stringMatching(/region is missing/),
+    });
+    const report = await s.diagnose();
+    expect(report.results.find((result) => result.id === 'azure')).toMatchObject({
+      outcome: 'skipped',
+      detail: expect.stringMatching(/region is missing/),
+    });
+  });
+
+  it('accepts the region as the Azure portal writes it', async () => {
+    const s = await services({
+      AZURE_SPEECH_KEY: '0123456789abcdef0123456789abcdef',
+      AZURE_SPEECH_REGION: 'West Europe',
+    });
+    expect(s.providerStatus().tts[0]).toMatchObject({ id: 'azure', state: 'ready' });
+  });
+});

@@ -1,0 +1,18 @@
+# Every text file is stored and checked out with LF line endings, on every platform.
+# Without this, Git for Windows (core.autocrlf=true) checks the sources out with CRLF,
+# which fails `npm run format:check` and makes shell scripts unusable in containers.
+* text=auto eol=lf
+
+# Windows command scripts are the exception: cmd.exe misreads labels in files with LF endings.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Binary assets: never converted, never diffed as text.
+*.png binary
+*.jpg binary
+*.ico binary
+*.wav binary
+*.mp3 binary
+*.onnx binary
+*.wasm binary
+*.woff2 binary

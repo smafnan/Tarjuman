@@ -16,7 +16,7 @@
 import type { LangCode } from './languages';
 import type { ChannelId, SessionSettings } from './settings';
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 export const WS_PATH = '/ws';
 
@@ -24,14 +24,20 @@ export const WS_PATH = '/ws';
 export const UTTERANCE_SAMPLE_RATE = 16_000;
 
 export const LIMITS = {
-  /** Utterances shorter than this are dropped as noise. */
-  minUtteranceMs: 250,
+  /**
+   * Utterances shorter than this are dropped as noise. Well below the shortest thing the
+   * browser sends on purpose: the last word of a sentence that was cut at the length cap
+   * arrives as speech plus a short tail, without the lead-in other utterances have.
+   */
+  minUtteranceMs: 150,
   /** Hard server-side cap. The browser segmenter splits long speech well before this. */
   maxUtteranceMs: 30_000,
   /** Cap for typed text and for a single transcript. */
   maxTextChars: 1_200,
   /** Cap for the JSON header of a binary frame. */
   maxHeaderBytes: 16 * 1024,
+  /** More queued speech than this makes no difference to anything done with the number. */
+  maxPlaybackLagMs: 600_000,
 } as const;
 
 // ---------------------------------------------------------------------------------------
@@ -100,6 +106,12 @@ export type ClientMessage =
   | { type: 'utterance.text'; id: string; channel: ChannelId; text: string }
   /** Abandon an utterance that is still being processed. */
   | { type: 'utterance.cancel'; id: string }
+  /**
+   * Someone has started to speak on `channel`: an utterance will follow in about a second.
+   * A hint only. The server uses the time to open its connections to the providers, so the
+   * utterance itself does not wait for a TLS handshake.
+   */
+  | { type: 'speech.start'; channel: ChannelId }
   | { type: 'ping'; t: number };
 
 export interface AudioUtteranceHeader {
@@ -173,7 +185,18 @@ export type ServerMessage =
       provider: string;
       ms: number;
     }
-  | { type: 'utterance.done'; id: string; channel: ChannelId; timings: UtteranceTimings }
+  | {
+      type: 'utterance.done';
+      id: string;
+      channel: ChannelId;
+      timings: UtteranceTimings;
+      /**
+       * Set when the translation was shown but deliberately not spoken: `late` means its turn
+       * came so long after it was translated that speaking it would only have delayed the
+       * sentences after it.
+       */
+      notSpoken?: 'late';
+    }
   | { type: 'utterance.dropped'; id: string; channel: ChannelId; reason: DropReason; detail?: string }
   | {
       type: 'utterance.error';

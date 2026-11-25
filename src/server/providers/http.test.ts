@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
 import { fakeFetch, jsonResponse } from '../../../tests/unit/helpers';
-import { extractErrorMessage, httpRequest, parseRetryAfter, readJson } from './http';
+import {
+  DAILY_QUOTA_RETRY_MS,
+  extractErrorCode,
+  extractErrorMessage,
+  HttpProviderError,
+  httpRequest,
+  parseRetryAfter,
+  rateLimitWaitMs,
+  readJson,
+} from './http';
 import { ProviderError } from './types';
 
 const signal = () => new AbortController().signal;
@@ -104,6 +113,102 @@ describe('httpRequest', () => {
     expect(error.kind).toBe('rate_limit');
     expect(error.retryAfterMs).toBe(34_000);
     expect(error.message).toContain('Quota exceeded');
+  });
+
+  it('stays away for a long time after a 429 for a DAILY quota, whatever the hint says', async () => {
+    // Each comes with a hint of seconds or minutes, which belongs to the per-minute limit.
+    const gemini = {
+      error: {
+        code: 429,
+        message:
+          'You exceeded your current quota, please check your plan and billing details. * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 500\nPlease retry in 36.2s.',
+        status: 'RESOURCE_EXHAUSTED',
+        details: [
+          {
+            '@type': 'type.googleapis.com/google.rpc.QuotaFailure',
+            violations: [
+              {
+                quotaMetric: 'generativelanguage.googleapis.com/generate_content_free_tier_requests',
+                quotaId: 'GenerateRequestsPerDayPerProjectPerModel-FreeTier',
+                quotaValue: '500',
+              },
+            ],
+          },
+          { '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '36s' },
+        ],
+      },
+    };
+    const groq = (unit: string) => ({
+      error: {
+        message: `Rate limit reached for model \`m\` in organization \`org\` service tier \`on_demand\` on ${unit}: Limit 1000, Used 1000, Requested 1. Please try again in 1m26.4s.`,
+        type: 'requests',
+        code: 'rate_limit_exceeded',
+      },
+    });
+    for (const [body, headers] of [
+      [gemini, {}],
+      [groq('requests per day (RPD)'), { 'retry-after': '87' }],
+      [groq('tokens per day (TPD)'), { 'retry-after': '87' }],
+    ] as const) {
+      const { fetch } = fakeFetch(() => jsonResponse(body, { status: 429, headers }));
+      const error = await failure(
+        httpRequest({ providerId: 'p', url: 'https://x.test', signal: signal(), fetchImpl: fetch }),
+      );
+      expect(error.kind).toBe('rate_limit');
+      expect(error.retryAfterMs).toBe(DAILY_QUOTA_RETRY_MS);
+    }
+    expect(DAILY_QUOTA_RETRY_MS).toBeGreaterThanOrEqual(10 * 60_000);
+  });
+
+  it('keeps the short hint for a per-minute limit', async () => {
+    const perMinute = {
+      error: {
+        code: 429,
+        message: 'Quota exceeded.',
+        details: [
+          {
+            violations: [{ quotaId: 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier' }],
+          },
+          { retryDelay: '36s' },
+        ],
+      },
+    };
+    const groqMinute = {
+      error: {
+        message:
+          'Rate limit reached for model `m` on tokens per minute (TPM): Limit 6000, Used 5900. Please try again in 2.5s.',
+        code: 'rate_limit_exceeded',
+      },
+    };
+    const cases = [
+      [perMinute, {}, 36_000],
+      [groqMinute, { 'retry-after': '3' }, 3_000],
+    ] as const;
+    for (const [body, headers, expected] of cases) {
+      const { fetch } = fakeFetch(() => jsonResponse(body, { status: 429, headers }));
+      const error = await failure(
+        httpRequest({ providerId: 'p', url: 'https://x.test', signal: signal(), fetchImpl: fetch }),
+      );
+      expect(error.retryAfterMs).toBe(expected);
+    }
+  });
+
+  it("carries the vendor's error code for callers that need to tell failures apart", async () => {
+    const { fetch } = fakeFetch(() =>
+      jsonResponse({ error: { message: 'gone', code: 'model_decommissioned' } }, { status: 400 }),
+    );
+    const error = await failure(
+      httpRequest({ providerId: 'p', url: 'https://x.test', signal: signal(), fetchImpl: fetch }),
+    );
+    expect(error).toBeInstanceOf(HttpProviderError);
+    expect((error as HttpProviderError).code).toBe('model_decommissioned');
+    expect(error.name).toBe('ProviderError');
+    expect(error.kind).toBe('bad_request');
+
+    // Google's numeric code repeats the status and is not a code in this sense.
+    expect(extractErrorCode('{"error":{"code":429,"message":"quota"}}')).toBeUndefined();
+    expect(extractErrorCode('<html>Bad Gateway</html>')).toBeUndefined();
+    expect(extractErrorCode('')).toBeUndefined();
   });
 
   it('leaves retryAfterMs unset when a 429 carries no hint', async () => {
@@ -267,6 +372,22 @@ describe('parseRetryAfter', () => {
     expect(parseRetryAfter(headers(), '', NOW)).toBeUndefined();
     expect(parseRetryAfter(headers(), '{"error":"rate limited"}', NOW)).toBeUndefined();
     expect(parseRetryAfter(headers('soon'), 'retryDelay later', NOW)).toBeUndefined();
+  });
+});
+
+describe('rateLimitWaitMs', () => {
+  const NOW = Date.parse('2026-11-11T10:00:00Z');
+
+  it('passes the hint through for ordinary limits and has none to invent', () => {
+    expect(rateLimitWaitMs(new Headers({ 'retry-after': '7' }), '{"error":"slow down"}', NOW)).toBe(7_000);
+    expect(rateLimitWaitMs(new Headers(), '{"error":"slow down"}', NOW)).toBeUndefined();
+  });
+
+  it('answers a daily quota with the long wait, or the hint when that is even longer', () => {
+    const daily = '{"error":{"message":"Limit reached on requests per day (RPD)"}}';
+    expect(rateLimitWaitMs(new Headers(), daily, NOW)).toBe(DAILY_QUOTA_RETRY_MS);
+    expect(rateLimitWaitMs(new Headers({ 'retry-after': '30' }), daily, NOW)).toBe(DAILY_QUOTA_RETRY_MS);
+    expect(rateLimitWaitMs(new Headers({ 'retry-after': '7200' }), daily, NOW)).toBe(7_200_000);
   });
 });
 

@@ -58,6 +58,60 @@ export function parseRetryAfter(
   return undefined;
 }
 
+/**
+ * A quota that refills once a day. Google names the quota that was hit (`quotaId`
+ * "…PerDay…"); Groq says "requests per day (RPD)" or "tokens per day (TPD)" in its message.
+ */
+const DAILY_QUOTA_PATTERN = /"quotaId"\s*:\s*"[^"]*PerDay|\b(?:requests|tokens) per day\b|\b(?:RPD|TPD)\b/i;
+
+/**
+ * Wait after a used-up daily quota. Providers attach a hint of seconds even to these (it
+ * belongs to their per-minute limit), and following it means one wasted round trip every few
+ * seconds for the rest of the day. The chain caps cooldowns, so this only needs to be long.
+ */
+export const DAILY_QUOTA_RETRY_MS = 60 * 60_000;
+
+/** How long to stay away after a 429: the provider's hint, or a long wait for a daily quota. */
+export function rateLimitWaitMs(
+  headers: Headers,
+  body: string,
+  now: number = Date.now(),
+): number | undefined {
+  const hint = parseRetryAfter(headers, body, now);
+  if (!DAILY_QUOTA_PATTERN.test(body)) return hint;
+  return Math.max(hint ?? 0, DAILY_QUOTA_RETRY_MS);
+}
+
+/** The machine-readable error code of the OpenAI-style envelope (`error.code`), if any. */
+export function extractErrorCode(body: string): string | undefined {
+  try {
+    const json: unknown = JSON.parse(body);
+    const error = json && typeof json === 'object' ? (json as { error?: unknown }).error : undefined;
+    const code = error && typeof error === 'object' ? (error as { code?: unknown }).code : undefined;
+    return typeof code === 'string' && code ? code : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * A `ProviderError` for an HTTP error status that also carries the vendor's error code, for
+ * callers that must tell apart failures the status alone lumps together.
+ */
+export class HttpProviderError extends ProviderError {
+  readonly code: string | undefined;
+
+  constructor(
+    providerId: string,
+    kind: ProviderErrorKind,
+    message: string,
+    options: { status: number; retryAfterMs?: number; code?: string },
+  ) {
+    super(providerId, kind, message, options);
+    this.code = options.code;
+  }
+}
+
 /** Pull a human-readable message out of the usual JSON error envelopes. */
 export function extractErrorMessage(body: string): string {
   const trimmed = body.trim();
@@ -113,9 +167,10 @@ export async function httpRequest(options: HttpRequestOptions): Promise<Response
   // not be mistaken for a malformed request, which callers react to by changing the request.
   if (kind === 'bad_request' && INVALID_KEY_PATTERN.test(body)) kind = 'auth';
   const detail = extractErrorMessage(body).slice(0, BODY_SNIPPET_CHARS);
-  throw new ProviderError(providerId, kind, `HTTP ${response.status}${detail ? ` — ${detail}` : ''}`, {
+  throw new HttpProviderError(providerId, kind, `HTTP ${response.status}${detail ? ` — ${detail}` : ''}`, {
     status: response.status,
-    retryAfterMs: kind === 'rate_limit' ? parseRetryAfter(response.headers, body) : undefined,
+    retryAfterMs: kind === 'rate_limit' ? rateLimitWaitMs(response.headers, body) : undefined,
+    code: extractErrorCode(body),
   });
 }
 

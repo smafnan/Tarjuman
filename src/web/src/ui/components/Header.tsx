@@ -1,5 +1,5 @@
 import { ArrowLeftRight, BookOpen, Settings } from 'lucide-react';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 
 import { LANGUAGES } from '../../../../shared/languages';
@@ -10,6 +10,7 @@ import { controller } from '../controller';
 import { useDismissable } from '../hooks/useDismissable';
 import { useNow } from '../hooks/useNow';
 import { formatCountdown } from '../lib/format';
+import { shiftIntoViewport } from '../lib/geometry';
 import { inFallbackOrder, PROVIDER_KIND_LABEL, PROVIDER_STATE_LABEL, summarizeChain } from '../lib/providers';
 
 const CONNECTION: Record<ConnectionState, { label: string; dot: string }> = {
@@ -27,6 +28,24 @@ function ProviderChip({ kind }: { kind: ProviderKind }) {
   const wrap = useRef<HTMLDivElement>(null);
   const close = useCallback(() => setOpen(false), []);
   useDismissable(open, wrap, close);
+
+  const popover = useRef<HTMLDivElement>(null);
+
+  // The list is anchored to its chip, which can sit anywhere in a wrapped top bar; slide it
+  // back into the window instead of letting it run off an edge.
+  useLayoutEffect(() => {
+    const element = popover.current;
+    if (!open || !element) return;
+    const fit = () => {
+      element.style.translate = '0';
+      const box = element.getBoundingClientRect();
+      const shift = shiftIntoViewport(box.left, box.right, document.documentElement.clientWidth, 8);
+      element.style.translate = `${shift}px`;
+    };
+    fit();
+    window.addEventListener('resize', fit);
+    return () => window.removeEventListener('resize', fit);
+  }, [open]);
 
   const summary = summarizeChain(chain);
   const coolingDown = summary.tone === 'warn' && summary.cooldownUntil !== null;
@@ -48,7 +67,12 @@ function ProviderChip({ kind }: { kind: ProviderKind }) {
         <span className="chip__value">{value}</span>
       </button>
       {open ? (
-        <div className="popover" role="dialog" aria-label={`${PROVIDER_KIND_LABEL[kind]} providers`}>
+        <div
+          className="popover"
+          ref={popover}
+          role="dialog"
+          aria-label={`${PROVIDER_KIND_LABEL[kind]} providers`}
+        >
           <p className="popover__title">Tried in this order</p>
           <ol className="chain">
             {inFallbackOrder(chain).map((provider) => (

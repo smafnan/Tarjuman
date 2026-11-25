@@ -1,5 +1,6 @@
 import type { MicVAD } from '@ricky0123/vad-web';
 
+import { UTTERANCE_SAMPLE_RATE } from '../../../shared/protocol';
 import { Segmenter, type Segment, type SegmenterOptions } from './segmenter';
 
 /**
@@ -18,8 +19,12 @@ const VAD_ASSET_PATH = '/vad/';
 const LEVEL_INTERVAL_MS = 100;
 
 export interface CaptureCallbacks {
-  /** A complete utterance. `endedAt` is the wall-clock time (epoch ms) at which it ended. */
-  onSegment(segment: Segment, endedAt: number): void;
+  /**
+   * A complete utterance. `reportedAt` is the wall-clock time (epoch ms) at which it was
+   * declared over; the speech itself stopped `segment.trailingSilenceMs` before that.
+   */
+  onSegment(segment: Segment, reportedAt: number): void;
+  /** True the moment speech starts, false when the utterance is over. */
   onSpeaking(speaking: boolean): void;
   /** Input level 0..1 (perceptual scale), at most every 100 ms. */
   onLevel(level: number): void;
@@ -32,8 +37,39 @@ export function meterLevel(rms: number): number {
   return Math.min(1, Math.max(0, (db + 60) / 60));
 }
 
+/**
+ * An audio context that runs at the rate the detector and the server want, for `stream`.
+ *
+ * The browser then converts the device's rate itself, with a proper low-pass filter. Left
+ * to its default context (the device rate), the detection library converts with a resampler
+ * that barely filters: everything above 8 kHz folds back into the speech band, and devices
+ * at 44.1 kHz or 8 kHz come out distorted.
+ *
+ * @returns null when the browser cannot do this (no context at that rate, or it refuses to
+ * attach a stream of another rate); the library's default context is the fallback.
+ */
+function detectionContext(stream: MediaStream): AudioContext | null {
+  let context: AudioContext;
+  try {
+    context = new AudioContext({ sampleRate: UTTERANCE_SAMPLE_RATE });
+  } catch {
+    return null;
+  }
+  try {
+    if (context.sampleRate !== UTTERANCE_SAMPLE_RATE) throw new Error('rate not honoured');
+    // The library attaches the stream the same way; better to learn here that it cannot.
+    context.createMediaStreamSource(stream).disconnect();
+    return context;
+  } catch {
+    void context.close().catch(() => undefined);
+    return null;
+  }
+}
+
 export class CaptureChannel {
   private vad: MicVAD | null = null;
+  /** The 16 kHz context detection runs in; ours to close. Null when the library uses its own. */
+  private context: AudioContext | null = null;
   private readonly segmenter: Segmenter;
   private gateClosed = false;
   /** performance.now() until which input is still ignored after the gate reopened. */
@@ -64,8 +100,29 @@ export class CaptureChannel {
     await this.stop();
     // Loaded on first use: the detector and its ONNX runtime are most of the page's JavaScript.
     const { MicVAD } = await import('@ricky0123/vad-web');
-    const vad = await MicVAD.new({
+    const context = detectionContext(stream);
+    try {
+      const vad = await this.createDetector(MicVAD, stream, context);
+      await vad.start();
+      // A context created outside a user action may start suspended; frames only flow once it runs.
+      if (context?.state === 'suspended') void context.resume().catch(() => undefined);
+      this.vad = vad;
+      this.context = context;
+    } catch (error) {
+      void context?.close().catch(() => undefined);
+      throw error;
+    }
+  }
+
+  private createDetector(
+    factory: typeof MicVAD,
+    stream: MediaStream,
+    context: AudioContext | null,
+  ): Promise<MicVAD> {
+    return factory.new({
       model: 'v5',
+      // With a context of our own the library neither creates nor closes one.
+      ...(context ? { audioContext: context } : {}),
       baseAssetPath: VAD_ASSET_PATH,
       onnxWASMBasePath: VAD_ASSET_PATH,
       startOnLoad: false,
@@ -82,18 +139,19 @@ export class CaptureChannel {
       minSpeechMs: 0,
       onFrameProcessed: (probabilities, frame) => this.onFrame(frame, probabilities.isSpeech),
     });
-    await vad.start();
-    this.vad = vad;
   }
 
   async stop(): Promise<void> {
     const vad = this.vad;
+    const context = this.context;
     this.vad = null;
+    this.context = null;
     // Send what was being said when capture stopped rather than losing it.
     this.segmenter.flush();
     this.segmenter.reset();
     this.callbacks.onLevel(0);
     if (vad) await vad.destroy().catch(() => undefined);
+    if (context) await context.close().catch(() => undefined);
   }
 
   /**

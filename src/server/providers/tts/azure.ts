@@ -19,6 +19,11 @@ export interface AzureCredentials {
   region: string;
 }
 
+/** The Azure portal shows a region as "West Europe"; the API wants "westeurope". */
+function normalizeRegion(region: string): string {
+  return region.toLowerCase().replace(/\s+/g, '');
+}
+
 /**
  * Accepts either `region:key` in the key itself (convenient for the Settings dialog, which
  * has one field per service) or a bare key plus a separately configured region.
@@ -31,12 +36,12 @@ export function parseAzureCredentials(
   if (!value) return undefined;
   const colon = value.indexOf(':');
   if (colon > 0) {
-    const inlineRegion = value.slice(0, colon).trim().toLowerCase();
+    const inlineRegion = normalizeRegion(value.slice(0, colon));
     const key = value.slice(colon + 1).trim();
     if (/^[a-z0-9]+$/.test(inlineRegion) && key) return { region: inlineRegion, key };
     return undefined;
   }
-  const configuredRegion = region?.trim().toLowerCase();
+  const configuredRegion = region === undefined ? undefined : normalizeRegion(region);
   if (!configuredRegion || !/^[a-z0-9]+$/.test(configuredRegion)) return undefined;
   return { region: configuredRegion, key: value };
 }
@@ -45,6 +50,8 @@ export interface AzureTtsOptions {
   getKey: () => string | undefined;
   getRegion: () => string | undefined;
   fetchImpl?: typeof fetch;
+  /** Opens a connection to the host of a URL ahead of a request (see `prepare`). */
+  warm?: (url: string) => void;
 }
 
 export class AzureTtsProvider implements TtsProvider {
@@ -62,6 +69,20 @@ export class AzureTtsProvider implements TtsProvider {
 
   isConfigured(): boolean {
     return this.credentials() !== undefined;
+  }
+
+  /** Settings has one field per service, so a key pasted without its region is an easy slip. */
+  unconfiguredReason(): string | undefined {
+    if (!this.options.getKey()?.trim() || this.credentials()) return undefined;
+    return 'The key is saved but its region is missing. Enter it as region:key, for example westeurope:0123abcd…';
+  }
+
+  prepare(): void {
+    const credentials = this.credentials();
+    if (!credentials) return;
+    this.options.warm?.(
+      `https://${credentials.region}.tts.speech.microsoft.com/cognitiveservices/voices/list`,
+    );
   }
 
   supportsLanguage(lang: LangCode): boolean {

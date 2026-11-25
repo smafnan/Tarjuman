@@ -34,6 +34,8 @@ they consider fair; nothing in the software enforces it.
 
 Windows may switch your default speaker to the cable after installation. If you suddenly
 hear nothing, set your headphones as the default output again (Settings → System → Sound).
+If you leave the cable as the default output, choose your headphones explicitly under
+**Translated voice plays on** (see step 3), or you will not hear the translation.
 
 ### macOS
 
@@ -61,6 +63,11 @@ The modules disappear on reboot unless you add them to your PipeWire/PulseAudio 
 Open the setup guide in the app. Step 1 lists the virtual devices it found. If device
 names are hidden, press **Show device names** and allow microphone access.
 
+In a narrow window (980 px wide or less, or 720 px high or less) the two channel panels sit
+in a strip above the conversation, and their device, voice and Advanced controls are folded
+behind a **Devices and voice** button. Press it to reach the lists named below, or make the
+window larger.
+
 ---
 
 ## 2. Send your translated voice into Teams
@@ -86,6 +93,9 @@ must play the phrase back.
 From now on the people in the call hear the German voice instead of your own. If you want
 them to hear you quietly underneath, as with a human interpreter, raise
 _Advanced → Let them hear my own voice underneath_ to about 10–15 %.
+
+To check what the others hear, raise _Advanced → Hear my translation in my headphones_.
+It is at 0 % by default, so you do not hear your own translation.
 
 ---
 
@@ -136,8 +146,16 @@ No sharing dialog, nothing to re-approve at every call, and no way for sounds to
 
 ### Then
 
-- **Translated voice plays on**: your headphones.
+- **Translated voice plays on**: your headphones. Choose them from the list explicitly
+  whenever the Windows default output is the cable, because the default device is then the
+  cable and you would hear nothing.
+- _Advanced → Lower the original while the translation plays_ (on by default) turns the
+  original voice down while the translation is spoken, so you can follow it.
 - Press **Play a test phrase** under step 3 of the setup guide: you should hear it there.
+- _Settings → Audio → Use the browser's voice if the server voice fails_ (on by default)
+  lets your browser speak the translation when the voice service does not answer. The
+  browser's voice always plays on the default speakers, so it helps only for what you hear;
+  it cannot reach the virtual microphone.
 
 ---
 
@@ -147,6 +165,10 @@ No sharing dialog, nothing to re-approve at every call, and no way for sounds to
 - Speak a sentence, pause briefly. The entry in the transcript shows your words, the German
   translation and English; the small number is the delay until the voice started.
 - If translated speech piles up ("x s of speech queued"), press **Skip** to jump to now.
+- **Push-to-talk** (panel _You speak_ → Advanced): hold **Space** to talk. It works only
+  while the Tarjuman window has focus. Holding Space while Teams is in front goes to Teams,
+  so click the Tarjuman window first. The status text says "Hold Space to talk while this
+  window is focused".
 - Type in the box at the bottom when a name or number must be exact.
 - **New topic** clears the conversation memory when the subject changes completely.
 - **Export** saves the transcript as Markdown, text or JSON: instant meeting notes.
@@ -158,14 +180,18 @@ the tab), and choose _Allow while visiting the site_ when Chrome asks about the 
 
 ## If something does not work
 
-| Symptom                                                         | Cause and fix                                                                                                                                                                |
-| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The Teams microphone level does not move during the test phrase | "Translated voice goes to" is not the cable, or the Teams microphone is not the cable's other end. On Windows the pair is _CABLE Input_ (Tarjuman) ↔ _CABLE Output_ (Teams). |
-| The others hear a chopped or robotic voice                      | Teams noise suppression or voice isolation. Set them to Low/Off as above.                                                                                                    |
-| The others hear the translation twice or with echo              | Your real microphone is still selected in Teams, or you use loudspeakers. Select the cable in Teams and wear headphones.                                                     |
-| "Nothing to listen to: the share did not include audio"         | The audio box in the sharing dialog was not ticked. Capture again.                                                                                                           |
-| Tarjuman translates its own Urdu voice back into German         | The translated voice reaches your microphone. Wear headphones, or switch off _Settings → Audio → I am using headphones_.                                                     |
-| German and Urdu voices overlap                                  | Lower the Teams volume or use _Mute the captured tab itself_ (option A) or option C.                                                                                         |
-| No device names in the lists                                    | Press _Show device names_ and allow the microphone.                                                                                                                          |
-| It stops when I switch to the Teams window                      | The Tarjuman window was minimised, or the tab was discarded. Keep it open in its own window.                                                                                 |
-| After a Windows update the cable is gone                        | Reinstall VB-CABLE as administrator and restart.                                                                                                                             |
+| Symptom                                                         | Cause and fix                                                                                                                                                                                                          |
+| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The Teams microphone level does not move during the test phrase | "Translated voice goes to" is not the cable, or the Teams microphone is not the cable's other end. On Windows the pair is _CABLE Input_ (Tarjuman) ↔ _CABLE Output_ (Teams).                                           |
+| The others hear a chopped or robotic voice                      | Teams noise suppression or voice isolation. Set them to Low/Off as above.                                                                                                                                              |
+| The others hear the translation twice or with echo              | Your real microphone is still selected in Teams, or you use loudspeakers. Select the cable in Teams and wear headphones.                                                                                               |
+| "Nothing to listen to: the share did not include audio"         | The audio box in the sharing dialog was not ticked. Capture again.                                                                                                                                                     |
+| Tarjuman translates its own Urdu voice back into German         | The translated voice reaches your microphone. Wear headphones, or switch off _Settings → Audio → I am using headphones_.                                                                                               |
+| German and Urdu voices overlap                                  | Lower the Teams volume or use _Mute the captured tab itself_ (option A) or option C.                                                                                                                                   |
+| No device names in the lists                                    | Press _Show device names_ and allow the microphone.                                                                                                                                                                    |
+| It stops when I switch to the Teams window                      | The Tarjuman window was minimised, or the tab was discarded. Keep it open in its own window.                                                                                                                           |
+| "Translated speech cannot be played: the audio device stopped." | The device behind "Translated voice plays on" or "Translated voice goes to" was unplugged or switched off (a headset, for example). Connect it again, or choose another one, and press **Resume audio** in the banner. |
+| The device, voice and Advanced controls are missing             | The window is narrow or low (980 px wide or 720 px high, or less). Press the **Devices and voice** button of the channel, or make the window larger.                                                                   |
+| Holding Space does nothing for push-to-talk                     | Space works only while the Tarjuman window has focus. Click the Tarjuman window first; with Teams in front the key goes to Teams.                                                                                      |
+| You hear no translation of what the others say                  | If the Windows default output is the cable, the translation goes there. Set **Translated voice plays on** to your headphones.                                                                                          |
+| After a Windows update the cable is gone                        | Reinstall VB-CABLE as administrator and restart.                                                                                                                                                                       |

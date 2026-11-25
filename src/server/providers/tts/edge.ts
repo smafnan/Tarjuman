@@ -31,6 +31,17 @@ const OUTPUT_FORMAT = 'audio-24khz-48kbitrate-mono-mp3';
 /** The service rejects SSML text above this many bytes. */
 const MAX_TEXT_BYTES = 4_096;
 const HANDSHAKE_TIMEOUT_MS = 6_000;
+/**
+ * How long a connection that was opened ahead of a request is kept. The service closes an
+ * unused connection after about 30 seconds.
+ */
+const STANDBY_MAX_AGE_MS = 20_000;
+/**
+ * When a request is announced again and the waiting connection is already this old, a new
+ * one is opened: a long sentence is announced when it starts and again when it arrives, and
+ * the connection from its start would expire just as the translation is ready.
+ */
+const STANDBY_REFRESH_MS = 8_000;
 
 const WIN_EPOCH_SECONDS = 11_644_473_600;
 /** The v2 token hashes this fixed prefix followed by the time ticks and the client token. */
@@ -183,17 +194,80 @@ class HandshakeRejected extends Error {
   }
 }
 
+const ignore = () => undefined;
+
+/**
+ * One connection to the service, used for exactly one request, as the Edge browser does.
+ *
+ * It can be opened before there is anything to say (see `EdgeTtsProvider.prepare`): whoever
+ * uses it later installs the three callbacks. Until then a failure only marks it as closed.
+ */
+class EdgeConnection {
+  state: 'connecting' | 'open' | 'closed' = 'connecting';
+  /** Why the connection closed, for a user that arrives afterwards. */
+  failure: unknown;
+  onOpen: () => void = ignore;
+  onMessage: (data: Buffer, isBinary: boolean) => void = ignore;
+  onFail: (error: unknown) => void = ignore;
+
+  constructor(
+    private readonly socket: WebSocket,
+    readonly openedAt: number,
+    now: () => number,
+  ) {
+    socket.on('open', () => {
+      if (this.state !== 'connecting') return;
+      this.state = 'open';
+      socket.send(buildConfigMessage(new Date(now())));
+      this.onOpen();
+    });
+    socket.on('unexpected-response', (_request, response) => {
+      const date = Date.parse(response.headers.date ?? '');
+      response.resume();
+      this.fail(new HandshakeRejected(response.statusCode ?? 0, Number.isFinite(date) ? date : undefined));
+    });
+    socket.on('message', (data, isBinary) => {
+      if (this.state !== 'open') return;
+      this.onMessage(Array.isArray(data) ? Buffer.concat(data) : Buffer.from(data as Buffer), isBinary);
+    });
+    socket.on('error', (error) => this.fail(error));
+    socket.on('close', (code) =>
+      this.fail(new Error(`connection closed before the audio was complete (code ${code})`)),
+    );
+  }
+
+  send(message: string): void {
+    this.socket.send(message);
+  }
+
+  private fail(error: unknown): void {
+    if (this.state === 'closed') return;
+    this.close();
+    this.failure = error;
+    this.onFail(error);
+  }
+
+  /** Safe in every state, and silent: nothing is reported after it. */
+  close(): void {
+    this.state = 'closed';
+    // terminate() is safe in every state; close() can throw before the socket is open.
+    this.socket.terminate();
+  }
+}
+
 export class EdgeTtsProvider implements TtsProvider {
   readonly id = 'edge';
   readonly kind = 'tts' as const;
   readonly label = 'Microsoft Edge neural voices (no key)';
   readonly requiresKey = false;
-  readonly timeoutMs = 12_000;
+  readonly timeoutMs = 8_000;
   private readonly endpoint: string;
   private readonly agent: HttpsProxyAgent<string> | undefined;
   private readonly now: () => number;
   /** Correction learned from the server's clock when a token is rejected. */
   private clockSkewMs = 0;
+  /** A connection opened ahead of the next request, and the timer that gives it up. */
+  private standby: { connection: EdgeConnection; expiry: ReturnType<typeof setTimeout> } | undefined;
 
   constructor(options: EdgeTtsOptions = {}) {
     this.endpoint = options.endpoint ?? DEFAULT_ENDPOINT;
@@ -220,25 +294,78 @@ export class EdgeTtsProvider implements TtsProvider {
     }));
   }
 
+  /**
+   * Open a connection now, for the sentence that is about to be translated. Opening one
+   * takes about two thirds of a second, twice as long as the synthesis of a sentence, and
+   * the time until the translation exists is otherwise spent waiting.
+   */
+  prepare(): void {
+    const waiting = this.standby?.connection;
+    if (waiting && waiting.state !== 'closed' && this.now() - waiting.openedAt < STANDBY_REFRESH_MS) return;
+    this.dropStandby();
+    const connection = this.connect();
+    // A token rejected for a wrong clock is worth learning from even before a request.
+    connection.onFail = (error) => this.learnClock(error);
+    const expiry = setTimeout(() => {
+      if (this.standby?.connection === connection) this.dropStandby();
+    }, STANDBY_MAX_AGE_MS);
+    expiry.unref();
+    this.standby = { connection, expiry };
+  }
+
+  /** Give up the connection that was opened ahead, if any (shutdown, tests). */
+  close(): void {
+    this.dropStandby();
+  }
+
+  private dropStandby(): void {
+    if (!this.standby) return;
+    clearTimeout(this.standby.expiry);
+    this.standby.connection.close();
+    this.standby = undefined;
+  }
+
+  /** The connection opened ahead, if it is still usable. It is handed out once. */
+  private takeStandby(): EdgeConnection | undefined {
+    const standby = this.standby;
+    if (!standby) return undefined;
+    this.standby = undefined;
+    clearTimeout(standby.expiry);
+    const { connection } = standby;
+    if (connection.state === 'closed' || this.now() - connection.openedAt > STANDBY_MAX_AGE_MS) {
+      connection.close();
+      return undefined;
+    }
+    return connection;
+  }
+
   async synthesize(request: TtsRequest): Promise<TtsResult> {
     const voice = resolveVoice(request.lang, request.voice);
     const text = limitTextBytes(request.text.trim());
     if (!text) throw new ProviderError(this.id, 'bad_request', 'nothing to synthesize');
+    if (request.signal.aborted) throw new ProviderError(this.id, 'aborted', 'request aborted');
 
     try {
-      return await this.attempt(text, voice.id, request);
+      return await this.attempt(this.takeStandby() ?? this.connect(), text, voice.id, request);
     } catch (error) {
       if (request.signal.aborted || !this.worthRetrying(error)) throw this.classify(error, request.signal);
-      if (error instanceof HandshakeRejected && error.serverDate !== undefined) {
-        // The token is time-based: a wrong local clock is the usual cause of a 403.
-        // Adopt the server's clock for this and all later requests.
-        this.clockSkewMs = error.serverDate - this.now();
-      }
+      this.learnClock(error);
       try {
-        return await this.attempt(text, voice.id, request);
+        // Always on a new connection: whatever was wrong with the first one is not inherited.
+        return await this.attempt(this.connect(), text, voice.id, request);
       } catch (retryError) {
         throw this.classify(retryError, request.signal);
       }
+    }
+  }
+
+  /**
+   * The token is time-based: a wrong local clock is the usual cause of a 403. Adopt the
+   * server's clock for all later requests.
+   */
+  private learnClock(error: unknown): void {
+    if (error instanceof HandshakeRejected && error.status === 403 && error.serverDate !== undefined) {
+      this.clockSkewMs = error.serverDate - this.now();
     }
   }
 
@@ -280,24 +407,33 @@ export class EdgeTtsProvider implements TtsProvider {
     return `${this.endpoint}?${params.toString()}`;
   }
 
-  private attempt(text: string, voiceId: string, request: TtsRequest): Promise<TtsResult> {
-    return new Promise<TtsResult>((resolve, reject) => {
-      const socket = new WebSocket(this.connectionUrl(), {
-        handshakeTimeout: HANDSHAKE_TIMEOUT_MS,
-        agent: this.agent,
-        headers: {
-          Pragma: 'no-cache',
-          'Cache-Control': 'no-cache',
-          Origin: 'chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold',
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) ' +
-            `Chrome/${CHROMIUM_MAJOR_VERSION}.0.0.0 Safari/537.36 Edg/${CHROMIUM_MAJOR_VERSION}.0.0.0`,
-          'Accept-Encoding': 'gzip, deflate, br, zstd',
-          'Accept-Language': 'en-US,en;q=0.9',
-          Cookie: `muid=${randomBytes(16).toString('hex').toUpperCase()};`,
-        },
-      });
+  private connect(): EdgeConnection {
+    const socket = new WebSocket(this.connectionUrl(), {
+      handshakeTimeout: HANDSHAKE_TIMEOUT_MS,
+      agent: this.agent,
+      headers: {
+        Pragma: 'no-cache',
+        'Cache-Control': 'no-cache',
+        Origin: 'chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold',
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) ' +
+          `Chrome/${CHROMIUM_MAJOR_VERSION}.0.0.0 Safari/537.36 Edg/${CHROMIUM_MAJOR_VERSION}.0.0.0`,
+        'Accept-Encoding': 'gzip, deflate, br, zstd',
+        'Accept-Language': 'en-US,en;q=0.9',
+        Cookie: `muid=${randomBytes(16).toString('hex').toUpperCase()};`,
+      },
+    });
+    return new EdgeConnection(socket, this.now(), this.now);
+  }
 
+  /** Speak `text` on `connection`, which may still be connecting. The connection is used up. */
+  private attempt(
+    connection: EdgeConnection,
+    text: string,
+    voiceId: string,
+    request: TtsRequest,
+  ): Promise<TtsResult> {
+    return new Promise<TtsResult>((resolve, reject) => {
       const chunks: Buffer[] = [];
       let settled = false;
 
@@ -305,8 +441,8 @@ export class EdgeTtsProvider implements TtsProvider {
         if (settled) return;
         settled = true;
         request.signal.removeEventListener('abort', onAbort);
-        // terminate() is safe in every state; close() can throw before the socket is open.
-        socket.terminate();
+        connection.onOpen = connection.onMessage = connection.onFail = ignore;
+        connection.close();
         outcome();
       };
       const fail = (error: unknown) =>
@@ -314,23 +450,14 @@ export class EdgeTtsProvider implements TtsProvider {
       const onAbort = () => fail(new ProviderError(this.id, 'aborted', 'request aborted'));
 
       if (request.signal.aborted) return onAbort();
+      if (connection.state === 'closed') {
+        return fail(connection.failure ?? new Error('connection closed before the audio was complete'));
+      }
       request.signal.addEventListener('abort', onAbort, { once: true });
 
-      socket.on('unexpected-response', (_req, response) => {
-        const date = Date.parse(response.headers.date ?? '');
-        response.resume();
-        fail(new HandshakeRejected(response.statusCode ?? 0, Number.isFinite(date) ? date : undefined));
-      });
-
-      socket.on('open', () => {
-        const now = new Date(this.now());
-        socket.send(buildConfigMessage(now));
-        socket.send(buildSsmlMessage(text, voiceId, request.rate, now));
-      });
-
-      socket.on('message', (data, isBinary) => {
+      connection.onFail = fail;
+      connection.onMessage = (buffer, isBinary) => {
         try {
-          const buffer = Array.isArray(data) ? Buffer.concat(data) : Buffer.from(data as Buffer);
           if (isBinary) {
             const { headers, audio } = parseAudioFrame(buffer);
             if (headers.Path !== 'audio') throw new Error(`unexpected binary frame path "${headers.Path}"`);
@@ -341,7 +468,9 @@ export class EdgeTtsProvider implements TtsProvider {
           const path = textFramePath(buffer.toString('utf8'));
           if (path !== 'turn.end') return; // turn.start, response, audio.metadata
           if (chunks.length === 0) {
-            throw new ProviderError(this.id, 'bad_response', 'Edge voice service returned no audio');
+            // The service's answer to text it finds nothing to say in. That is about this
+            // request, so it must not count against the service the way an outage does.
+            throw new ProviderError(this.id, 'bad_request', 'Edge voice service returned no audio');
           }
           finish(() =>
             resolve({ audio: new Uint8Array(Buffer.concat(chunks)), mime: 'audio/mpeg', voice: voiceId }),
@@ -349,12 +478,12 @@ export class EdgeTtsProvider implements TtsProvider {
         } catch (error) {
           fail(error);
         }
-      });
+      };
 
-      socket.on('error', fail);
-      socket.on('close', (code) =>
-        fail(new Error(`connection closed before the audio was complete (code ${code})`)),
-      );
+      const speak = () =>
+        connection.send(buildSsmlMessage(text, voiceId, request.rate, new Date(this.now())));
+      if (connection.state === 'open') speak();
+      else connection.onOpen = speak;
     });
   }
 }

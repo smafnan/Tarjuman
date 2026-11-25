@@ -42,8 +42,8 @@ export function App() {
   };
   const close = () => setDialog(null);
 
-  // A modal dialog covers the page, so toasts are shown inside whichever dialog is open.
-  const toasts = <Toasts />;
+  // A modal dialog makes the page inert, so each dialog carries its own copy of the toasts.
+  const dialogToasts = <Toasts placement="dialog" />;
 
   return (
     <div className="app">
@@ -57,6 +57,7 @@ export function App() {
         <div className="reading">
           <Transcript onOpenGuide={() => setDialog('guide')} />
           <Composer />
+          <Toasts placement="page" covered={dialog !== null} />
         </div>
       </main>
 
@@ -65,10 +66,9 @@ export function App() {
         tab={settingsTab}
         onTabChange={setSettingsTab}
         onClose={close}
-        overlay={toasts}
+        overlay={dialogToasts}
       />
-      <SetupGuide open={dialog === 'guide'} onClose={close} overlay={toasts} />
-      {dialog === null ? toasts : null}
+      <SetupGuide open={dialog === 'guide'} onClose={close} overlay={dialogToasts} />
     </div>
   );
 }

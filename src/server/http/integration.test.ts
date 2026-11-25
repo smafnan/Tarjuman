@@ -1,8 +1,10 @@
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { request as httpRequest } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { tmpdir } from 'node:os';
+import { tmpdir, userInfo } from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
 
 import type { FastifyInstance } from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -21,8 +23,11 @@ import {
 } from '../../shared/protocol';
 import { DEFAULT_SESSION_SETTINGS } from '../../shared/settings';
 import { loadConfig } from '../config';
-import { createServices } from '../services';
+import { AbortedError } from '../providers/chain';
+import { createServices, type Services } from '../services';
 import { buildApp } from './app';
+
+const run = promisify(execFile);
 
 /** The real server, on a real socket, with the offline mock providers. */
 interface Running {
@@ -30,19 +35,26 @@ interface Running {
   http: string;
   ws: string;
   dataDir: string;
+  services: Services;
 }
 
 const running: Running[] = [];
 const sockets: WebSocket[] = [];
 
-async function start(env: Record<string, string> = {}): Promise<Running> {
+async function start(env: Record<string, string> = {}, logger?: Record<string, unknown>): Promise<Running> {
   const dataDir = await mkdtemp(path.join(tmpdir(), 'tarjuman-test-'));
   const fullEnv = { TARJUMAN_MOCK: '1', DATA_DIR: dataDir, ...env };
   const services = await createServices(loadConfig(fullEnv, dataDir), fullEnv);
-  const app = await buildApp(services);
+  const app = await buildApp(services, { logger });
   await app.listen({ host: '127.0.0.1', port: 0 });
   const { port } = app.server.address() as AddressInfo;
-  const server = { app, http: `http://127.0.0.1:${port}`, ws: `ws://127.0.0.1:${port}/ws`, dataDir };
+  const server = {
+    app,
+    services,
+    http: `http://127.0.0.1:${port}`,
+    ws: `ws://127.0.0.1:${port}/ws`,
+    dataDir,
+  };
   running.push(server);
   return server;
 }
@@ -265,7 +277,20 @@ describe('server over a real socket', () => {
 
     const file = path.join(server.dataDir, 'keys.json');
     expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ GROQ_API_KEY: secret });
-    expect((await stat(file)).mode & 0o777).toBe(0o600);
+    if (process.platform === 'win32') {
+      // File modes mean nothing on Windows: the protection is the ACL, so ask icacls.
+      const root = process.env.SystemRoot ?? 'C:\\Windows';
+      const { stdout } = await run(path.join(root, 'System32', 'icacls.exe'), [file]);
+      const entries = stdout
+        .split(/\r?\n/)
+        .map((line) => line.replace(file, '').trim())
+        .filter((line) => /:\(/.test(line));
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).not.toContain('(I)');
+      expect(entries[0]?.toLowerCase()).toContain(userInfo().username.toLowerCase());
+    } else {
+      expect((await stat(file)).mode & 0o777).toBe(0o600);
+    }
 
     expect((await put({ NOT_A_KEY: 'x' })).status).toBe(400);
     expect((await put({ GROQ_API_KEY: 'has spaces in it' })).status).toBe(400);
@@ -299,6 +324,62 @@ describe('server over a real socket', () => {
     expect((await post({ text: '', lang: 'de' })).status).toBe(400);
     expect((await post({ text: 'hello', lang: 'xx' })).status).toBe(400);
     expect((await post({ text: 'x'.repeat(301), lang: 'de' })).status).toBe(400);
+  });
+
+  it('answers quietly when the browser cancels a voice preview', async () => {
+    const lines: string[] = [];
+    const server = await start(
+      {},
+      { level: 'error', stream: { write: (line: string) => void lines.push(line) } },
+    );
+    let started!: () => void;
+    const hasStarted = new Promise<void>((resolve) => (started = resolve));
+    let finish!: () => void;
+    const hasFinished = new Promise<void>((resolve) => (finish = resolve));
+    server.services.chains.tts.run = (async (_task: unknown, options?: { signal?: AbortSignal }) => {
+      started();
+      await new Promise<void>((done) => options?.signal?.addEventListener('abort', () => done()));
+      finish();
+      throw new AbortedError();
+    }) as typeof server.services.chains.tts.run;
+
+    const controller = new AbortController();
+    const request = fetch(`${server.http}/api/tts`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'Guten Morgen', lang: 'de' }),
+      signal: controller.signal,
+    }).catch(() => undefined);
+    await hasStarted;
+    controller.abort();
+    await request;
+    await hasFinished;
+    // Give the error handler the time it would have needed to log.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(lines.join('')).not.toContain('request failed');
+    expect((await fetch(`${server.http}/api/health`)).status).toBe(200);
+  });
+
+  it('names the file that could not be written when saving keys fails', async () => {
+    const base = await mkdtemp(path.join(tmpdir(), 'tarjuman-test-'));
+    const blocker = path.join(base, 'not-a-folder');
+    await writeFile(blocker, 'x');
+    const server = await start({ DATA_DIR: path.join(blocker, 'data') });
+    // start() made a folder of its own; the one that holds the blocker is cleaned up instead.
+    await rm(server.dataDir, { recursive: true, force: true });
+    running[running.length - 1] = { ...server, dataDir: base };
+
+    const secret = 'gsk_abcdefghijklmnopqrstuvwxyz0123456789';
+    const response = await fetch(`${server.http}/api/keys`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ keys: { GROQ_API_KEY: secret } }),
+    });
+    expect(response.status).toBe(500);
+    const { error } = (await response.json()) as { error: { code: string; message: string } };
+    expect(error.message).toContain(path.join(blocker, 'data', 'keys.json'));
+    expect(error.message).not.toContain(secret);
+    expect(error.message).not.toBe('internal error');
   });
 
   it('runs diagnostics against every provider', async () => {

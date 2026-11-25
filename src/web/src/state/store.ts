@@ -15,7 +15,10 @@ import {
 
 const STORAGE_KEY = 'tarjuman.settings.v1';
 
-/** Keep the transcript bounded so a day-long session cannot exhaust memory. */
+/**
+ * The on-screen transcript is bounded, so a day-long session does not slow the page down.
+ * What scrolls out of it is kept for the export (see `transcriptForExport`).
+ */
 export const MAX_TRANSCRIPT_ENTRIES = 500;
 const MAX_NOTICES = 4;
 
@@ -150,6 +153,7 @@ export function initialChannelRuntime(): ChannelRuntime {
     replaysOriginal: false,
     sinkLabel: null,
     sinkOk: true,
+    outputBlocked: false,
   };
 }
 
@@ -194,13 +198,31 @@ export function patchChannel(channel: ChannelId, patch: Partial<ChannelRuntime>)
   });
 }
 
+/**
+ * Entries that have scrolled out of the on-screen transcript, oldest first. Outside the store
+ * on purpose: nothing renders them, they are only read when the transcript is exported.
+ */
+let scrolledOut: TranscriptEntry[] = [];
+
 export function addEntry(entry: TranscriptEntry): void {
-  useAppStore.setState((state) => {
-    const transcript = [...state.transcript, entry];
-    if (transcript.length > MAX_TRANSCRIPT_ENTRIES)
-      transcript.splice(0, transcript.length - MAX_TRANSCRIPT_ENTRIES);
-    return { transcript };
-  });
+  const transcript = [...useAppStore.getState().transcript, entry];
+  if (transcript.length > MAX_TRANSCRIPT_ENTRIES) {
+    const removed = transcript.splice(0, transcript.length - MAX_TRANSCRIPT_ENTRIES);
+    // Only what an export would contain is worth keeping: words that were understood.
+    for (const old of removed) if (old.sourceText && old.status !== 'dropped') scrolledOut.push(old);
+  }
+  useAppStore.setState({ transcript });
+}
+
+/** Everything that was said since the transcript was last cleared, oldest first. */
+export function transcriptForExport(): TranscriptEntry[] {
+  return [...scrolledOut, ...useAppStore.getState().transcript];
+}
+
+/** Empty the transcript, on screen and in what is kept for the export. */
+export function clearTranscript(): void {
+  scrolledOut = [];
+  useAppStore.setState({ transcript: [] });
 }
 
 /** Update one entry. `patch` may be a function of the current entry. Unknown ids are ignored. */

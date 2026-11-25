@@ -21,7 +21,10 @@ export interface SegmenterOptions {
   startThreshold: number;
   /** Probability below which a frame counts as silence once an utterance is running. */
   endThreshold: number;
-  /** Utterances with less speech than this are discarded as noise. */
+  /**
+   * Utterances with less speech than this are discarded as noise. The remainder of a sentence
+   * that was cut at `hardMaxMs` is exempt: its last word belongs to speech already sent.
+   */
   minSpeechMs: number;
   /** Audio kept from before the first speech frame, so word onsets are not clipped. */
   preRollMs: number;
@@ -44,6 +47,12 @@ export interface Segment {
   durationMs: number;
   /** True when the cut was forced by `hardMaxMs` rather than found at a pause. */
   forcedSplit: boolean;
+  /**
+   * How long ago the speech in this segment stopped when the segment was reported: the pause
+   * that had to pass before the utterance counted as over (or, after a forced split, the
+   * audio that already belongs to the next segment).
+   */
+  trailingSilenceMs: number;
 }
 
 export interface SegmenterCallbacks {
@@ -63,7 +72,8 @@ export function segmenterOptions(sensitivity: VadSensitivity, pauseMs: number): 
   return {
     sampleRate: 16_000,
     ...THRESHOLDS[sensitivity],
-    minSpeechMs: 250,
+    // A one-word answer ("Ja", "جی") holds 160 to 250 ms of detected speech.
+    minSpeechMs: 160,
     preRollMs: 320,
     pauseMs,
     softMaxMs: 9_000,
@@ -105,6 +115,8 @@ export class Segmenter {
   private speechMs = 0;
   /** Length of the current run of silence at the end of the utterance. */
   private silenceMs = 0;
+  /** The running utterance is the rest of speech that was cut at `hardMaxMs`. */
+  private continuesSplit = false;
 
   constructor(options: SegmenterOptions, callbacks: SegmenterCallbacks) {
     this.options = options;
@@ -124,7 +136,10 @@ export class Segmenter {
   }
 
   /** Feed one frame. `samples` is copied, so the caller may reuse its buffer. */
-  push(samples: Float32Array, probability: number): void {
+  push(samples: Float32Array, rawProbability: number): void {
+    // A detector fed broken input answers NaN, and NaN fails every comparison below: it would
+    // neither count as silence nor as speech.
+    const probability = Number.isFinite(rawProbability) ? rawProbability : 0;
     const frame: Frame = { samples: samples.slice(), probability };
     const ms = this.frameMs(samples);
     const o = this.options;
@@ -133,10 +148,7 @@ export class Segmenter {
       if (probability < o.startThreshold) {
         this.preRoll.push(frame);
         this.preRollMs += ms;
-        while (this.preRollMs > o.preRollMs && this.preRoll.length > 0) {
-          const dropped = this.preRoll.shift();
-          if (dropped) this.preRollMs -= this.frameMs(dropped.samples);
-        }
+        this.trimPreRoll();
         return;
       }
       this.active = true;
@@ -181,21 +193,37 @@ export class Segmenter {
     if (wasActive) this.callbacks.onSpeechEnd();
   }
 
+  private trimPreRoll(): void {
+    while (this.preRollMs > this.options.preRollMs && this.preRoll.length > 0) {
+      const dropped = this.preRoll.shift();
+      if (dropped) this.preRollMs -= this.frameMs(dropped.samples);
+    }
+  }
+
   private clear(): void {
     this.active = false;
+    this.continuesSplit = false;
     this.frames = [];
     this.utteranceMs = 0;
     this.speechMs = 0;
     this.silenceMs = 0;
   }
 
-  private emit(frames: readonly Frame[], speechMs: number, forcedSplit: boolean): void {
-    if (speechMs < this.options.minSpeechMs) return;
+  private emit(
+    frames: readonly Frame[],
+    speechMs: number,
+    forcedSplit: boolean,
+    trailingSilenceMs: number,
+    continuesSplit: boolean,
+  ): void {
+    const enough = continuesSplit ? speechMs > 0 : speechMs >= this.options.minSpeechMs;
+    if (!enough) return;
     const samples = concat(frames);
     this.callbacks.onSegment({
       samples,
       durationMs: Math.round((samples.length / this.options.sampleRate) * 1000),
       forcedSplit,
+      trailingSilenceMs: Math.round(trailingSilenceMs),
     });
   }
 
@@ -213,10 +241,17 @@ export class Segmenter {
       end -= 1;
     }
     const speechMs = this.speechMs;
+    const silenceMs = this.silenceMs;
+    const continuesSplit = this.continuesSplit;
     const kept = frames.slice(0, end);
     this.clear();
+    // The pause that was cut off is the lead-in of whatever is said next: a sentence that
+    // starts right after it would otherwise begin without its soft onset.
+    this.preRoll = frames.slice(end);
+    this.preRollMs = this.preRoll.reduce((sum, f) => sum + this.frameMs(f.samples), 0);
+    this.trimPreRoll();
     this.callbacks.onSpeechEnd();
-    this.emit(kept, speechMs, forcedSplit);
+    this.emit(kept, speechMs, forcedSplit, silenceMs, continuesSplit);
   }
 
   /** The speaker has not paused for `hardMaxMs`: cut at the quietest recent frame and keep going. */
@@ -243,19 +278,24 @@ export class Segmenter {
     const tail = frames.slice(splitAt + 1);
     const speechOf = (list: readonly Frame[]) =>
       list.reduce((sum, f) => (f.probability >= o.endThreshold ? sum + this.frameMs(f.samples) : sum), 0);
+    const silenceAtEndOf = (list: readonly Frame[]) => {
+      let silence = 0;
+      for (let i = list.length - 1; i >= 0; i--) {
+        const frame = list[i];
+        if (!frame || frame.probability >= o.endThreshold) break;
+        silence += this.frameMs(frame.samples);
+      }
+      return silence;
+    };
 
     // The tail becomes the beginning of the next utterance; the speaker is still talking.
+    const wasContinuation = this.continuesSplit;
     this.frames = tail;
     this.utteranceMs = tail.reduce((sum, f) => sum + this.frameMs(f.samples), 0);
     this.speechMs = speechOf(tail);
-    let trailingSilence = 0;
-    for (let i = tail.length - 1; i >= 0; i--) {
-      const frame = tail[i];
-      if (!frame || frame.probability >= o.endThreshold) break;
-      trailingSilence += this.frameMs(frame.samples);
-    }
-    this.silenceMs = trailingSilence;
+    this.silenceMs = silenceAtEndOf(tail);
+    this.continuesSplit = true;
 
-    this.emit(head, speechOf(head), true);
+    this.emit(head, speechOf(head), true, silenceAtEndOf(head) + this.utteranceMs, wasContinuation);
   }
 }

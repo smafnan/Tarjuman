@@ -1,12 +1,12 @@
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { parse } from 'dotenv';
 import { describe, expect, it } from 'vitest';
 
-import { ConfigError, loadConfig } from './config';
+import { ConfigError, findProjectRoot, loadConfig, PROJECT_ROOT } from './config';
 import { checkRequestOrigin } from './http/security';
-import { nodeSupportsEnvProxy } from './startupEnv';
 
 describe('loadConfig', () => {
   it('has safe defaults: local only, no token, keys writable', () => {
@@ -127,10 +127,32 @@ describe('checkRequestOrigin', () => {
   });
 });
 
-describe('nodeSupportsEnvProxy', () => {
-  it('knows from which Node version the proxy flag exists', () => {
-    expect(nodeSupportsEnvProxy('22.12.0')).toBe(false);
-    expect(nodeSupportsEnvProxy('22.21.0')).toBe(true);
-    expect(nodeSupportsEnvProxy('24.1.0')).toBe(true);
+describe('project root', () => {
+  it('is the folder that contains package.json, found from src/server and from dist/server', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'tarjuman-root-'));
+    try {
+      writeFileSync(path.join(root, 'package.json'), '{}');
+      for (const sub of ['src/server', 'dist/server']) {
+        mkdirSync(path.join(root, sub), { recursive: true });
+        expect(findProjectRoot(path.join(root, sub))).toBe(root);
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('resolves DATA_DIR and WEB_DIR against the project root, not the working directory', () => {
+    expect(PROJECT_ROOT).toBe(path.resolve(import.meta.dirname, '../..'));
+    const config = loadConfig({});
+    expect(config.dataDir).toBe(path.join(PROJECT_ROOT, 'data'));
+    expect(config.webDir).toBe(path.join(PROJECT_ROOT, 'dist', 'web'));
+  });
+
+  it('keeps absolute DATA_DIR and WEB_DIR values and honours a given base directory', () => {
+    const abs = path.resolve(tmpdir(), 'somewhere');
+    const config = loadConfig({ DATA_DIR: abs, WEB_DIR: path.join(abs, 'web') }, '/base');
+    expect(config.dataDir).toBe(abs);
+    expect(config.webDir).toBe(path.join(abs, 'web'));
+    expect(loadConfig({ DATA_DIR: 'state' }, '/base').dataDir).toBe(path.resolve('/base', 'state'));
   });
 });

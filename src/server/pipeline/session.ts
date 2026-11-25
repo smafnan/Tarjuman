@@ -62,6 +62,12 @@ export interface PipelineChains {
    * of translators excludes it: translation must then go through the translation chain only.
    */
   recognizerMayTranslate: boolean;
+  /**
+   * How long a recognizer may take with `audioMs` of speech before the next one is started
+   * alongside it. A recognizer that translates in the same call replaces two requests and
+   * writes more the longer the utterance is, so it is given correspondingly longer.
+   */
+  sttHedgeMs?: (provider: SttProvider, audioMs: number) => number;
 }
 
 export interface SessionOptions {
@@ -73,8 +79,21 @@ export interface SessionOptions {
   now?: () => number;
 }
 
-/** Upper bound of utterances being processed at once; protects quotas if the client misbehaves. */
+/**
+ * Upper bound of utterances that are still being recognized or translated; protects quotas
+ * if the client misbehaves. Utterances that only wait to be spoken do not count: a voice
+ * service that hangs must not cost the captions of both directions.
+ */
 const MAX_IN_FLIGHT = 12;
+
+/**
+ * A translation whose turn to be spoken comes this long after it was shown is not spoken any
+ * more. By then the conversation has moved on, and every late sentence delays the next one.
+ */
+const MAX_SPEECH_DELAY_MS = 15_000;
+
+/** A report of the playback queue in the browser is trusted for this long. */
+const LAG_REPORT_MAX_AGE_MS = 20_000;
 
 /** Audio quieter than this (RMS, full scale = 1) cannot contain usable speech. */
 const SILENCE_RMS = 0.0015;
@@ -93,7 +112,8 @@ interface Utterance {
   job: Omit<TranslationJob, 'history'>;
   controller: AbortController;
   receivedAt: number;
-  playbackLagMs: number;
+  /** Set once the translation has been sent: from then on only speech is outstanding. */
+  translatedAt: number | undefined;
   timings: Omit<UtteranceTimings, 'totalMs'>;
 }
 
@@ -133,6 +153,11 @@ export class InterpreterSession {
     outgoing: Promise.resolve(),
     incoming: Promise.resolve(),
   };
+  /** The newest report of how much translated speech is still queued in the browser, per channel. */
+  private readonly playbackLag: Record<ChannelId, { ms: number; at: number }> = {
+    outgoing: { ms: 0, at: 0 },
+    incoming: { ms: 0, at: 0 },
+  };
   private closed = false;
   private readonly chains: PipelineChains;
   private readonly transport: SessionTransport;
@@ -155,6 +180,30 @@ export class InterpreterSession {
   /** Forget the conversation context (new topic or new meeting). */
   resetContext(): void {
     this.memory.clear();
+  }
+
+  /**
+   * Somebody started to speak on `channel`: an utterance will arrive shortly. Let the
+   * providers it will need open their connections in the meantime.
+   */
+  prepare(channel: ChannelId): void {
+    if (this.closed) return;
+    const settings = this.settings.channels[channel];
+    const language = settings.sourceLang;
+    this.chains.stt.prepare(
+      {
+        filter: (provider) => provider.supportsLanguage(language),
+        rank: (provider) => this.chains.sttRank(provider, language),
+      },
+      2,
+    );
+    this.chains.mt.prepare();
+    this.prepareVoice(settings);
+  }
+
+  private prepareVoice(settings: ChannelSettings): void {
+    if (!settings.speak) return;
+    this.chains.tts.prepare({ filter: (provider) => provider.supportsLanguage(settings.targetLang) });
   }
 
   /** Number of utterances currently being processed. */
@@ -203,7 +252,10 @@ export class InterpreterSession {
     if (audioMs > LIMITS.maxUtteranceMs) return this.emitDropped(id, channel, 'too_long');
     if (pcmRms(pcm) < SILENCE_RMS) return this.emitDropped(id, channel, 'no_speech', 'silent audio');
 
-    const utterance = this.begin(id, channel, header.playbackLagMs, header.forcedSplit);
+    const lag = header.playbackLagMs;
+    this.playbackLag[channel] = { ms: Number.isFinite(lag) ? Math.max(0, lag) : 0, at: this.now() };
+
+    const utterance = this.begin(id, channel, header.forcedSplit);
     const language = utterance.job.sourceLang;
     const hints = this.settings.glossary.map((entry) => entry.term);
 
@@ -226,7 +278,7 @@ export class InterpreterSession {
           signal: utterance.controller.signal,
           filter: (provider) => provider.supportsLanguage(language),
           rank: (provider) => this.chains.sttRank(provider, language),
-          hedgeAfterMs: STT_HEDGE_MS,
+          hedgeAfterMs: (provider) => this.chains.sttHedgeMs?.(provider, audioMs) ?? STT_HEDGE_MS,
         },
       )
       .then((run) => ({ run, ms: this.now() - sttStartedAt }));
@@ -243,13 +295,17 @@ export class InterpreterSession {
       const { run, ms } = recognized;
       utterance.timings.sttMs = ms;
 
-      const text = normalizeTranscript(run.value.text).slice(0, LIMITS.maxTextChars);
-      const verdict = judgeTranscript(text, { lang: language, audioMs, signals: run.value, hints });
+      const heard = normalizeTranscript(run.value.text).slice(0, LIMITS.maxTextChars);
+      const verdict = judgeTranscript(heard, { lang: language, audioMs, signals: run.value, hints });
       if (!verdict.keep) {
         this.finish(utterance);
         this.emitDropped(id, channel, verdict.reason, verdict.detail);
         return;
       }
+      // The filter may have removed a recognizer artefact from an otherwise real sentence.
+      const text = verdict.text ?? heard;
+      // What the recognizer translated belongs to what it heard, not to the cleaned text.
+      const untouched = text === heard;
       this.transport.send({
         type: 'utterance.transcript',
         id,
@@ -260,7 +316,7 @@ export class InterpreterSession {
         ms,
       });
       await this.translate(utterance, text, {
-        translations: this.chains.recognizerMayTranslate ? run.value.translations : undefined,
+        translations: this.chains.recognizerMayTranslate && untouched ? run.value.translations : undefined,
         provider: run.provider.id,
       });
     });
@@ -285,7 +341,7 @@ export class InterpreterSession {
       return;
     }
 
-    const utterance = this.begin(id, channel, 0, false);
+    const utterance = this.begin(id, channel, false);
     this.transport.send({
       type: 'utterance.transcript',
       id,
@@ -316,8 +372,9 @@ export class InterpreterSession {
     let ms = 0;
 
     const precomputed = fromRecognizer?.translations;
-    if (precomputed && job.targetLangs.every((lang) => Boolean(precomputed[lang]))) {
-      // The recognizer was a multimodal model that already translated in the same call.
+    if (fromRecognizer && precomputed?.[utterance.settings.targetLang]) {
+      // The recognizer was a multimodal model that already translated in the same call. A
+      // caption language it left out is not worth a second request and a second of delay.
       translations = precomputed;
       provider = fromRecognizer.provider;
     } else {
@@ -348,6 +405,7 @@ export class InterpreterSession {
       throw new StageFailure('mt', 'provider_failed', 'translation is missing the target language');
 
     utterance.timings.mtMs = ms;
+    utterance.translatedAt = this.now();
     this.memory.add({ speaker, lang: job.sourceLang, text });
     this.transport.send({ type: 'utterance.translation', id, channel, translations, provider, ms });
     // Switched on deliberately for debugging, so it must be visible at the default log level.
@@ -355,10 +413,27 @@ export class InterpreterSession {
 
     // Hand over to the speech lane and return, so the next utterance can be translated now.
     this.onSpeechLane(utterance, async () => {
-      if (utterance.settings.speak) await this.speak(utterance, spoken);
+      const waited = this.now() - (utterance.translatedAt ?? this.now());
+      let late = false;
+      if (!utterance.settings.speak) {
+        // Captions only.
+      } else if (waited > MAX_SPEECH_DELAY_MS) {
+        late = true;
+        this.logger.warn({ id, channel, waitedMs: waited }, 'speech skipped: the voice fell too far behind');
+      } else {
+        await this.speak(utterance, spoken);
+      }
       this.finish(utterance);
       const timings: UtteranceTimings = { ...utterance.timings, totalMs: this.now() - utterance.receivedAt };
-      this.transport.send({ type: 'utterance.done', id, channel, timings });
+      // The browser has to know: on the outgoing channel the user would otherwise believe
+      // that the other side heard the sentence.
+      this.transport.send({
+        type: 'utterance.done',
+        id,
+        channel,
+        timings,
+        ...(late ? { notSpoken: 'late' } : {}),
+      });
       this.logger.debug({ id, channel, ...timings }, 'utterance done');
     });
   }
@@ -366,19 +441,28 @@ export class InterpreterSession {
   private async speak(utterance: Utterance, text: string): Promise<void> {
     const { id, channel, settings } = utterance;
     const lang = settings.targetLang;
-    const chunks = splitForSpeech(text, lang);
+    // A chunk without a letter or a digit ("…", "—") gives a voice nothing to say; the
+    // services answer it with an error, which would rest the provider for no reason.
+    const chunks = splitForSpeech(text, lang).filter((chunk) => /[\p{L}\p{N}]/u.test(chunk));
     if (chunks.length === 0) return;
 
-    const rate = effectiveSpeechRate(settings.speechRate, utterance.playbackLagMs);
+    const rate = effectiveSpeechRate(settings.speechRate, this.currentLag(channel));
     const voice = settings.voice === 'auto' ? undefined : settings.voice;
     const startedAt = this.now();
 
+    // Its own switch, so that the request made ahead for the next chunk can be stopped when
+    // this utterance fails, without touching anything else.
+    const speaking = new AbortController();
+    const signal = AbortSignal.any([utterance.controller.signal, speaking.signal]);
+
     const synthesize = (chunk: string) => {
       const pending = this.chains.tts.run(
-        (tts, signal) => tts.synthesize({ text: chunk, lang, voice, rate, signal }),
+        (tts, attempt) => tts.synthesize({ text: chunk, lang, voice, rate, signal: attempt }),
         {
-          signal: utterance.controller.signal,
+          signal,
           filter: (tts) => tts.supportsLanguage(lang),
+          // The caption is already on screen: better no voice now than a voice much later.
+          impatient: true,
         },
       );
       pending.catch(() => undefined);
@@ -397,6 +481,7 @@ export class InterpreterSession {
       try {
         run = await current;
       } catch (error) {
+        speaking.abort();
         throw this.stageFailure('tts', error);
       }
       if (this.closed) return;
@@ -436,14 +521,22 @@ export class InterpreterSession {
       this.emitError(id, channel, stage, 'bad_request', 'duplicate utterance id');
       return false;
     }
-    if (this.inFlight.size >= MAX_IN_FLIGHT) {
+    let working = 0;
+    for (const utterance of this.inFlight.values()) if (utterance.translatedAt === undefined) working += 1;
+    if (working >= MAX_IN_FLIGHT) {
       this.emitError(id, channel, stage, 'rate_limited', 'too many utterances are still being processed');
       return false;
     }
     return true;
   }
 
-  private begin(id: string, channel: ChannelId, playbackLagMs: number, fragment: boolean): Utterance {
+  /** How much translated speech the browser still has queued for `channel`, as far as we know. */
+  private currentLag(channel: ChannelId): number {
+    const report = this.playbackLag[channel];
+    return this.now() - report.at <= LAG_REPORT_MAX_AGE_MS ? report.ms : 0;
+  }
+
+  private begin(id: string, channel: ChannelId, fragment: boolean): Utterance {
     const settings = this.settings.channels[channel];
     const utterance: Utterance = {
       id,
@@ -459,10 +552,12 @@ export class InterpreterSession {
       },
       controller: new AbortController(),
       receivedAt: this.now(),
-      playbackLagMs: Number.isFinite(playbackLagMs) ? Math.max(0, playbackLagMs) : 0,
+      translatedAt: undefined,
       timings: {},
     };
     this.inFlight.set(id, utterance);
+    // The voice is needed in about a second: time enough to open its connection now.
+    this.prepareVoice(settings);
     return utterance;
   }
 

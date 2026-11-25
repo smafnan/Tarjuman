@@ -16,7 +16,7 @@ import { isLangCode } from '../../shared/languages';
 import { WS_PATH } from '../../shared/protocol';
 import { SPEECH_RATE_MAX, SPEECH_RATE_MIN } from '../../shared/settings';
 import { KeyValidationError } from '../keys';
-import { ChainExhaustedError, NoProviderError } from '../providers/chain';
+import { AbortedError, ChainExhaustedError, NoProviderError } from '../providers/chain';
 import type { Services } from '../services';
 import { bearerToken, checkRequestOrigin, safeEqual } from './security';
 import { ConnectionHub, WS_MAX_PAYLOAD_BYTES } from './ws';
@@ -94,6 +94,7 @@ export async function buildApp(services: Services, options: BuildAppOptions = {}
   const keysResponse = (): KeysResponse => ({
     keys: services.keys.status(),
     writable: config.keysWritable,
+    problems: [...services.keys.problems],
     info: services.info(),
   });
 
@@ -127,7 +128,16 @@ export async function buildApp(services: Services, options: BuildAppOptions = {}
       await services.keys.update(changes);
     } catch (error) {
       if (error instanceof KeyValidationError) return sendError(reply, 400, 'bad_request', error.message);
-      throw error;
+      // The path is not a secret and tells the user which folder to fix; the key values never leave the store.
+      const reason = (error as NodeJS.ErrnoException).code ?? 'unknown error';
+      request.log.error({ code: reason }, 'saving keys failed');
+      return sendError(
+        reply,
+        500,
+        'internal',
+        `The keys could not be saved: ${services.keys.filePath} could not be written (${reason}). ` +
+          'Check that the folder exists and your account may write to it, or set DATA_DIR in .env.',
+      );
     }
     return keysResponse();
   });
@@ -166,6 +176,8 @@ export async function buildApp(services: Services, options: BuildAppOptions = {}
         .header(TTS_VOICE_HEADER, run.value.voice)
         .send(Buffer.from(run.value.audio));
     } catch (error) {
+      // The browser cancelled the preview: nobody is left to answer, and it is not a server fault.
+      if (error instanceof AbortedError) return reply;
       if (error instanceof NoProviderError) return sendError(reply, 503, error.code, error.message);
       if (error instanceof ChainExhaustedError) return sendError(reply, 502, error.code, error.message);
       throw error;

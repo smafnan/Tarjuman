@@ -11,6 +11,7 @@ import {
   type ErrorCode,
   type ServerMessage,
 } from '../../shared/protocol';
+import { CHANNEL_IDS } from '../../shared/settings';
 import { InterpreterSession } from '../pipeline/session';
 import type { Services } from '../services';
 import { parseAudioHeader, parseClientMessage } from './messages';
@@ -136,6 +137,9 @@ export class ConnectionHub {
         }
         session.updateSettings(message.settings);
         started = true;
+        // The page was just opened or reconnected: the first sentence should not be the one
+        // that pays for every connection.
+        for (const channel of CHANNEL_IDS) session.prepare(channel);
         return send({ type: 'session.ready', sessionId, info: this.services.info() });
       }
 
@@ -150,6 +154,8 @@ export class ConnectionHub {
           return session.submitText(message.id, message.channel, message.text);
         case 'utterance.cancel':
           return session.cancel(message.id);
+        case 'speech.start':
+          return session.prepare(message.channel);
       }
     };
 

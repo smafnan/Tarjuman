@@ -1,8 +1,9 @@
-import 'dotenv/config';
+import path from 'node:path';
 
 import type { DiagnosticResult } from '../src/shared/api';
 import type { ProviderKind } from '../src/shared/protocol';
-import { ConfigError, loadConfig } from '../src/server/config';
+import { ConfigError, loadConfig, PROJECT_ROOT } from '../src/server/config';
+import { loadEnvFile } from '../src/server/env';
 import { createServices } from '../src/server/services';
 
 /**
@@ -35,13 +36,16 @@ const MARK: Record<DiagnosticResult['outcome'], string> = {
 };
 
 const ADVICE: Record<ProviderKind, string> = {
-  stt: 'add GROQ_API_KEY (free, https://console.groq.com/keys) to .env or under Settings in the app',
+  stt: 'add GROQ_API_KEY (free, https://console.groq.com/keys) or GEMINI_API_KEY (free, https://aistudio.google.com/apikey) to .env or under Settings in the app',
   mt: 'add GROQ_API_KEY or GEMINI_API_KEY (both free) to .env or under Settings in the app',
   tts: 'the keyless Edge voices need outbound access to speech.platform.bing.com; alternatively set AZURE_SPEECH_KEY',
 };
 
 async function main(): Promise<number> {
   const json = process.argv.includes('--json');
+  const envFile = loadEnvFile(path.join(PROJECT_ROOT, '.env'));
+  // stderr, so that --json output stays parseable.
+  if (envFile.problem) console.error(red(envFile.problem));
   const config = loadConfig();
   const services = await createServices(config);
 

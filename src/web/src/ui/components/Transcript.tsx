@@ -7,6 +7,7 @@ import { useAppStore } from '../../state/store';
 import type { TranscriptEntry, TranscriptExportFormat } from '../../state/types';
 import { controller } from '../controller';
 import { useDismissable } from '../hooks/useDismissable';
+import { isFinished } from '../lib/announce';
 import { CHANNEL_COPY } from '../lib/channels';
 import { cx } from '../lib/cx';
 import { formatClock, formatSeconds } from '../lib/format';
@@ -44,10 +45,10 @@ const Entry = memo(function Entry({ entry }: { entry: TranscriptEntry }) {
   const extras = (Object.keys(entry.translations) as LangCode[]).filter(
     (lang) => lang !== entry.targetLang && lang !== entry.sourceLang && entry.translations[lang],
   );
-  const working = entry.status === 'transcribing' || entry.status === 'translating';
+  const working = !isFinished(entry.status);
 
   return (
-    <li className={`entry entry--${entry.channel}`}>
+    <li className={`entry entry--${entry.channel}`} aria-hidden={working ? true : undefined}>
       <div className="entry__meta">
         <span className={`tag tag--${entry.channel}`}>{copy.tag}</span>
         <time dateTime={new Date(entry.createdAt).toISOString()}>{formatClock(entry.createdAt)}</time>
@@ -251,15 +252,19 @@ export function Transcript({ onOpenGuide }: { onOpenGuide: () => void }) {
       <Toolbar hasEntries={transcript.length > 0} />
       <div className="transcript">
         <div className="transcript__scroll" ref={scroller}>
-          {transcript.length === 0 ? (
-            <EmptyState onOpenGuide={onOpenGuide} />
-          ) : (
-            <ol className="transcript__list">
-              {transcript.map((entry) => (
-                <Entry key={entry.id} entry={entry} />
-              ))}
-            </ol>
-          )}
+          {transcript.length === 0 ? <EmptyState onOpenGuide={onOpenGuide} /> : null}
+          {/* Always in the document: a live region only announces changes made after it exists. */}
+          <ol
+            className="transcript__list"
+            role="log"
+            aria-label="Conversation"
+            aria-live="polite"
+            aria-relevant="additions"
+          >
+            {transcript.map((entry) => (
+              <Entry key={entry.id} entry={entry} />
+            ))}
+          </ol>
         </div>
         {showJump && transcript.length > 0 ? (
           <button type="button" className="button button--primary button--small jump" onClick={scrollToEnd}>

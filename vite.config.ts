@@ -1,12 +1,15 @@
-import 'dotenv/config';
-
 import path from 'node:path';
 
 import react from '@vitejs/plugin-react';
 import { defineConfig, normalizePath } from 'vite';
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 
-// The same .env the server reads (loaded above), so a changed PORT moves the proxy with it.
+import { loadEnvFile } from './src/server/env';
+
+const WEB_ROOT = path.resolve(import.meta.dirname, 'src/web');
+
+// The same .env the server reads (UTF-16 files from PowerShell included), so a changed PORT moves the proxy with it.
+loadEnvFile(path.join(import.meta.dirname, '.env'));
 const SERVER = `http://127.0.0.1:${process.env.PORT || '8787'}`;
 
 /**
@@ -14,7 +17,7 @@ const SERVER = `http://127.0.0.1:${process.env.PORT || '8787'}`;
  * In development Vite serves the app on :5173 and proxies /api and /ws to the server.
  */
 export default defineConfig({
-  root: path.resolve(import.meta.dirname, 'src/web'),
+  root: WEB_ROOT,
   plugins: [
     react(),
     // The voice-activity-detection model, its audio worklet and the ONNX runtime are loaded
@@ -26,8 +29,10 @@ export default defineConfig({
         'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm',
         'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.mjs',
       ].map((file) => ({
-        // The plugin globs its sources, and globs need forward slashes: Windows paths must be normalised.
-        src: normalizePath(path.resolve(import.meta.dirname, file)),
+        // The plugin globs its sources, so an absolute path breaks when the project folder name contains
+        // ( ) [ ] or { } (a ZIP unpacked to "Tarjuman-main (1)"). Relative to the Vite root there is no such folder
+        // name in the pattern; globs also need forward slashes, hence normalizePath.
+        src: normalizePath(path.relative(WEB_ROOT, path.resolve(import.meta.dirname, file))),
         dest: 'vad',
         // Copy the files themselves, not their node_modules/... directory structure.
         rename: { stripBase: true },

@@ -881,3 +881,348 @@ describe('FallbackChain: status reporting', () => {
     expect(calls).toEqual(['a', 'b', 'a']);
   });
 });
+
+describe('FallbackChain: slow providers', () => {
+  /** Answers after a fixed (fake) time unless aborted first. */
+  function timed(latency: Record<string, number | 'never'>) {
+    const launches: string[] = [];
+    const operation = (p: FakeProvider, signal: AbortSignal): Promise<string> =>
+      new Promise((resolve, reject) => {
+        launches.push(p.id);
+        const after = latency[p.id] ?? 0;
+        const timer = after === 'never' ? undefined : setTimeout(() => resolve(`from ${p.id}`), after);
+        signal.addEventListener('abort', () => {
+          clearTimeout(timer);
+          reject(new ProviderError(p.id, 'aborted', 'request aborted'));
+        });
+      });
+    return { launches, operation };
+  }
+
+  it('rests a provider that keeps losing to the fallback started after it', async () => {
+    vi.useFakeTimers();
+    const chain = new FallbackChain('mt', [provider('slow', { timeoutMs: 60_000 }), provider('fast')]);
+    const { launches, operation } = timed({ slow: 4_000, fast: 300 });
+
+    for (let i = 0; i < 4; i++) {
+      const pending = chain.run(operation, opts({ hedgeAfterMs: 2_200 }));
+      await vi.advanceTimersByTimeAsync(2_500);
+      expect((await pending).provider.id).toBe('fast');
+      await vi.advanceTimersByTimeAsync(1_000);
+    }
+
+    // Two sentences pay the hedge delay; after that the slow provider is out of the way.
+    expect(launches).toEqual(['slow', 'fast', 'slow', 'fast', 'fast', 'fast']);
+    expect(chain.status()[0]).toMatchObject({ state: 'cooldown', detail: expect.stringMatching(/slow/) });
+  });
+
+  it('rests providers that accept a request and never answer', async () => {
+    vi.useFakeTimers();
+    const chain = new FallbackChain('mt', [
+      provider('hung-1', { timeoutMs: 60_000 }),
+      provider('hung-2', { timeoutMs: 60_000 }),
+      provider('ok'),
+    ]);
+    const { launches, operation } = timed({ 'hung-1': 'never', 'hung-2': 'never', ok: 100 });
+
+    for (let i = 0; i < 2; i++) {
+      const pending = chain.run(operation, opts({ hedgeAfterMs: 2_000 }));
+      await vi.advanceTimersByTimeAsync(4_200);
+      expect((await pending).provider.id).toBe('ok');
+    }
+    expect(chain.status().map((s) => s.state)).toEqual(['cooldown', 'cooldown', 'ready']);
+
+    launches.length = 0;
+    const third = chain.run(operation, opts({ hedgeAfterMs: 2_000 }));
+    await vi.advanceTimersByTimeAsync(150);
+    await third;
+    expect(launches).toEqual(['ok']);
+  });
+
+  it('gives a provider that is slow again a longer rest, and forgives it once it wins a race', async () => {
+    vi.useFakeTimers();
+    const speed = { a: 4_000 };
+    const chain = new FallbackChain('mt', [provider('a', { timeoutMs: 60_000 }), provider('b')]);
+    const operation = (p: FakeProvider, signal: AbortSignal): Promise<string> =>
+      new Promise((resolve, reject) => {
+        const timer = setTimeout(() => resolve(p.id), p.id === 'a' ? speed.a : 100);
+        signal.addEventListener('abort', () => {
+          clearTimeout(timer);
+          reject(new ProviderError(p.id, 'aborted', 'request aborted'));
+        });
+      });
+    const once = async () => {
+      const pending = chain.run(operation, opts({ hedgeAfterMs: 1_000 }));
+      await vi.advanceTimersByTimeAsync(1_200);
+      return (await pending).provider.id;
+    };
+    const restOf = () => (chain.status()[0]?.cooldownUntil ?? Date.now()) - Date.now();
+
+    await once();
+    await once();
+    // (The rest began when the fallback answered, a moment before this line.)
+    expect(restOf()).toBeGreaterThan(29_000);
+    expect(restOf()).toBeLessThanOrEqual(30_000);
+
+    // Back after its rest. One slow answer is not held against it again (a single long
+    // request must not send the better provider away); a second one is, for twice as long.
+    await vi.advanceTimersByTimeAsync(30_000);
+    await once();
+    expect(chain.status()[0]).toMatchObject({ state: 'ready' });
+    await once();
+    expect(restOf()).toBeGreaterThan(59_000);
+    expect(restOf()).toBeLessThanOrEqual(60_000);
+
+    // Once it answers first, the slate is clean.
+    await vi.advanceTimersByTimeAsync(60_000);
+    speed.a = 50;
+    expect(await once()).toBe('a');
+    speed.a = 4_000;
+    await once();
+    await once();
+    expect(restOf()).toBeGreaterThan(29_000);
+    expect(restOf()).toBeLessThanOrEqual(30_000);
+  });
+
+  it('counts one slow moment met by two overlapping requests as one strike', async () => {
+    vi.useFakeTimers();
+    const chain = new FallbackChain('stt', [provider('slow', { timeoutMs: 60_000 }), provider('fast')]);
+    const { launches, operation } = timed({ slow: 4_000, fast: 300 });
+
+    // Both directions are recognized at the same time, and the first provider is slow for both.
+    const both = [
+      chain.run(operation, opts({ hedgeAfterMs: 2_000 })),
+      chain.run(operation, opts({ hedgeAfterMs: 2_000 })),
+    ];
+    await vi.advanceTimersByTimeAsync(2_500);
+    await Promise.all(both);
+    expect(launches).toEqual(['slow', 'slow', 'fast', 'fast']);
+    expect(chain.status()[0]).toMatchObject({ state: 'ready' });
+  });
+
+  it('never rests a slow provider for more than two minutes', async () => {
+    vi.useFakeTimers();
+    const chain = new FallbackChain('mt', [provider('slow', { timeoutMs: 60_000 }), provider('fast')]);
+    const { operation } = timed({ slow: 'never', fast: 50 });
+    let longest = 0;
+    for (let round = 0; round < 12; round++) {
+      const pending = chain.run(operation, opts({ hedgeAfterMs: 500 }));
+      await vi.advanceTimersByTimeAsync(600);
+      await pending;
+      const until = chain.status()[0]?.cooldownUntil;
+      if (until !== undefined) {
+        longest = Math.max(longest, until - Date.now());
+        await vi.advanceTimersByTimeAsync(until - Date.now());
+      }
+    }
+    expect(longest).toBeGreaterThan(110_000);
+    expect(longest).toBeLessThanOrEqual(120_000);
+  });
+
+  it('gives each provider its own patience when the hedge delay is a function', async () => {
+    vi.useFakeTimers();
+    const chain = new FallbackChain('stt', [provider('patient', { timeoutMs: 60_000 }), provider('b')]);
+    const { launches, operation } = timed({ patient: 3_000, b: 100 });
+    const pending = chain.run(operation, opts({ hedgeAfterMs: (p) => (p.id === 'patient' ? 3_500 : 1_000) }));
+    await vi.advanceTimersByTimeAsync(3_100);
+    expect((await pending).provider.id).toBe('patient');
+    expect(launches).toEqual(['patient']);
+  });
+});
+
+describe('FallbackChain: penalties and concurrent requests', () => {
+  it('keeps a rate-limit rest when a request that was already under way succeeds', async () => {
+    const time = clock();
+    const chain = new FallbackChain('stt', [provider('a'), provider('b')], { now: time.now });
+    const op = controllable();
+    const first = chain.run(op.operation, opts());
+    const second = chain.run(op.operation, opts());
+    await flushMicrotasks();
+    expect(op.ids()).toEqual(['a', 'a']);
+
+    must(op.started[1]).result.reject(fail(provider('a'), 'rate_limit', { retryAfterMs: 40_000 }));
+    await flushMicrotasks();
+    must(op.started[2]).result.resolve('from b');
+    await second;
+    time.advance(800);
+    must(op.started[0]).result.resolve('from a');
+    await first;
+
+    expect(chain.status()[0]).toMatchObject({ state: 'cooldown', cooldownUntil: time.now() + 39_200 });
+    const third = chain.run(op.operation, opts());
+    await flushMicrotasks();
+    expect(op.ids()[3]).toBe('b');
+    must(op.started[3]).result.resolve('x');
+    await third;
+  });
+
+  it('lifts the rest when a request made during it succeeds', async () => {
+    const time = clock();
+    const chain = new FallbackChain('stt', [provider('a')], { now: time.now });
+    const { operation } = script({ a: ['rate_limit', 'ok'] });
+    await chain.run(operation, opts()).catch(() => undefined);
+    expect(chain.status()[0]).toMatchObject({ state: 'cooldown' });
+    // Nothing else is configured, so the resting provider is tried anyway, and answers.
+    await chain.run(operation, opts());
+    expect(chain.status()[0]).toMatchObject({ state: 'ready' });
+  });
+
+  it('never shortens a rest the provider asked for', async () => {
+    const time = clock();
+    const chain = new FallbackChain('stt', [provider('a'), provider('b')], { now: time.now });
+    const op = controllable();
+    const runs = [chain.run(op.operation, opts()), chain.run(op.operation, opts())];
+    await flushMicrotasks();
+    must(op.started[1]).result.reject(fail(provider('a'), 'rate_limit', { retryAfterMs: 60_000 }));
+    await flushMicrotasks();
+    must(op.started[0]).result.reject(fail(provider('a'), 'bad_response'));
+    await flushMicrotasks();
+    expect(must(chain.status()[0]?.cooldownUntil) - time.now()).toBe(60_000);
+    for (const call of op.started.slice(2)) call.result.resolve('b');
+    await Promise.all(runs);
+  });
+
+  it('counts one outage seen by several parallel requests as one failure', async () => {
+    const time = clock();
+    const chain = new FallbackChain('stt', [provider('a'), provider('b')], { now: time.now });
+    const op = controllable();
+    const runs = [0, 1, 2, 3].map(() => chain.run(op.operation, opts()));
+    await flushMicrotasks();
+    for (const call of op.started.slice(0, 4)) call.result.reject(fail(provider('a'), 'unavailable'));
+    await flushMicrotasks();
+    expect(must(chain.status()[0]?.cooldownUntil) - time.now()).toBe(5_000);
+    for (const call of op.started.slice(4)) call.result.resolve('b');
+    await Promise.all(runs);
+
+    // A failure of a request made afterwards is a new incident and does lengthen the rest.
+    time.advance(5_000);
+    const { operation } = script({ a: ['unavailable'] });
+    await chain.run(operation, opts());
+    expect(must(chain.status()[0]?.cooldownUntil) - time.now()).toBe(10_000);
+  });
+});
+
+describe('FallbackChain: resting providers as a last resort', () => {
+  it('tries a resting provider when the only usable one fails', async () => {
+    const time = clock();
+    const chain = new FallbackChain('stt', [provider('a', { requestsPerMinute: 1 }), provider('b')], {
+      now: time.now,
+    });
+    const { calls, operation } = script({ b: ['unavailable'] });
+    await chain.run(operation, opts()); // a: its budget for this minute is used
+    time.advance(5_000);
+    const result = await chain.run(operation, opts());
+    expect(result.provider.id).toBe('a');
+    expect(calls).toEqual(['a', 'b', 'a']);
+  });
+
+  it('tries only one resting provider per request', async () => {
+    const time = clock();
+    const chain = new FallbackChain('stt', [provider('a'), provider('b'), provider('c')], { now: time.now });
+    const { calls, operation } = script({ a: ['rate_limit'], b: ['rate_limit'], c: ['unavailable'] });
+    await chain.run(operation, opts()).catch(() => undefined);
+    calls.length = 0;
+    time.advance(100);
+    const error = await chain.run(operation, opts()).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ChainExhaustedError);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('does not hedge to a provider that started to rest while the request was under way', async () => {
+    vi.useFakeTimers();
+    const chain = new FallbackChain('mt', [provider('a'), provider('b', { requestsPerMinute: 1 })]);
+    const op = controllable();
+    const first = chain.run(op.operation, opts({ hedgeAfterMs: 100 }));
+    await vi.advanceTimersByTimeAsync(10);
+    const other = chain.run(op.operation, opts({ filter: (p) => p.id === 'b' })).catch((e: unknown) => e);
+    await vi.advanceTimersByTimeAsync(1);
+    must(op.started.find((s) => s.id === 'b')).result.reject(
+      fail(provider('b'), 'rate_limit', { retryAfterMs: 30_000 }),
+    );
+    await other;
+    await vi.advanceTimersByTimeAsync(200);
+    expect(op.ids()).toEqual(['a', 'b']);
+    must(op.started[0]).result.resolve('a');
+    await first;
+  });
+
+  it('fails at once, when asked to be impatient, instead of waiting on a provider that timed out', async () => {
+    vi.useFakeTimers();
+    const chain = new FallbackChain('tts', [provider('voice', { timeoutMs: 1_000 })]);
+    const calls: string[] = [];
+    const hang = (p: FakeProvider, signal: AbortSignal): Promise<string> =>
+      new Promise((_resolve, reject) => {
+        calls.push(p.id);
+        signal.addEventListener('abort', () => reject(new Error('aborted')));
+      });
+
+    const first = chain.run(hang, opts({ impatient: true })).catch((e: unknown) => e);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await first).toBeInstanceOf(ChainExhaustedError);
+
+    // While it rests, the next sentence does not wait out another deadline.
+    const second = await chain.run(hang, opts({ impatient: true })).catch((e: unknown) => e);
+    expect(second).toBeInstanceOf(ChainExhaustedError);
+    expect((second as ChainExhaustedError).code).toBe('timeout');
+    expect(calls).toEqual(['voice']);
+
+    // A patient caller still tries it at any time.
+    const patient = chain.run(hang, opts()).catch((e: unknown) => e);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await patient;
+    expect(calls).toEqual(['voice', 'voice']);
+  });
+
+  it('still retries at once, even when impatient, a provider that failed quickly', async () => {
+    const chain = new FallbackChain('tts', [provider('voice')]);
+    const { calls, operation } = script({ voice: ['unavailable', 'ok'] });
+    await chain.run(operation, opts({ impatient: true })).catch(() => undefined);
+    expect((await chain.run(operation, opts({ impatient: true }))).provider.id).toBe('voice');
+    expect(calls).toEqual(['voice', 'voice']);
+  });
+});
+
+describe('FallbackChain: preparing', () => {
+  it('lets the providers that would be tried first open their connections', () => {
+    const prepared: string[] = [];
+    const withPrepare = (id: string, extra: Partial<FakeProvider> = {}) =>
+      provider(id, { prepare: () => void prepared.push(id), ...extra });
+    const chain = new FallbackChain('stt', [
+      withPrepare('no-key', { configured: false }),
+      withPrepare('a'),
+      withPrepare('b'),
+      withPrepare('c'),
+    ]);
+
+    chain.prepare();
+    expect(prepared).toEqual(['a']);
+
+    prepared.length = 0;
+    chain.prepare({ rank: (p) => (p.id === 'c' ? 0 : 1), filter: (p) => p.id !== 'a' }, 2);
+    expect(prepared).toEqual(['c', 'b']);
+  });
+
+  it('never throws, whatever a provider or the configuration does', () => {
+    const broken = provider('a', {
+      prepare: () => {
+        throw new Error('boom');
+      },
+    });
+    expect(() => new FallbackChain('stt', [broken]).prepare()).not.toThrow();
+    expect(() => new FallbackChain('stt', [provider('a', { configured: false })]).prepare()).not.toThrow();
+  });
+});
+
+describe('FallbackChain: status of half-configured providers', () => {
+  it('says what is missing instead of asking for a key that is already there', () => {
+    const azure = provider('azure', {
+      configured: false,
+      unconfiguredReason: () => 'The key is saved but its region is missing.',
+    });
+    const chain = new FallbackChain('tts', [azure, provider('plain', { configured: false })]);
+    expect(chain.status()).toMatchObject([
+      { id: 'azure', state: 'disabled', detail: 'The key is saved but its region is missing.' },
+      { id: 'plain', state: 'unconfigured', detail: 'API key not set' },
+    ]);
+  });
+});

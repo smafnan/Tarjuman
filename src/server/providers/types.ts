@@ -66,6 +66,17 @@ export interface ProviderBase {
   /** Per-request deadline in ms. */
   readonly timeoutMs: number;
   isConfigured(): boolean;
+  /**
+   * Why `isConfigured()` is false, when "API key not set" would mislead (a key is there but
+   * something else is missing). Shown in the provider list and by the diagnostics.
+   */
+  unconfiguredReason?(): string | undefined;
+  /**
+   * A request is likely within the next few seconds (somebody started to speak). Open the
+   * connection now, so the request itself does not pay for a TLS handshake. Best effort:
+   * must not throw, must not spend quota, and may be called often.
+   */
+  prepare?(): void;
 }
 
 // ---------------------------------------------------------------------------------------
@@ -151,7 +162,11 @@ export interface MtRequest extends TranslationJob {
 }
 
 export interface MtResult {
-  /** A non-empty translation for every requested target language (empty when `skipped`). */
+  /**
+   * The translation into the first target language (the one that is spoken) is always there,
+   * unless `skipped`. The other target languages are captions: a provider leaves out one it
+   * could not produce rather than fail the whole answer.
+   */
   translations: Partial<Record<LangCode, string>>;
   /**
    * True when the provider judged that there is nothing to translate (noise, a

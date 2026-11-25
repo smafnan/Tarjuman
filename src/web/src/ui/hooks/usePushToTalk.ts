@@ -2,15 +2,7 @@ import { useEffect } from 'react';
 
 import { useAppStore } from '../../state/store';
 import { controller } from '../controller';
-
-// Space keeps its normal meaning (typing, activating a control) while focus is in one of these.
-const INTERACTIVE =
-  'input, textarea, select, button, summary, a[href], [role="tab"], [contenteditable]:not([contenteditable="false"])';
-
-function spaceBelongsToThePage(target: EventTarget | null): boolean {
-  if (document.querySelector('dialog[open]')) return true;
-  return target instanceof Element && target.closest(INTERACTIVE) !== null;
-}
+import { createPushToTalkKeys } from '../lib/pushToTalk';
 
 /** While the microphone is in push-to-talk mode, holding Space opens it. */
 export function usePushToTalk(): void {
@@ -18,37 +10,21 @@ export function usePushToTalk(): void {
 
   useEffect(() => {
     if (!enabled) return;
-    let held = false;
+    const keys = createPushToTalkKeys({
+      setHeld: (held) => controller().setPushToTalk(held),
+      // A modal dialog has its own keyboard; Space there belongs to its controls.
+      dialogOpen: () => document.querySelector('dialog[open]') !== null,
+    });
 
-    const release = () => {
-      if (!held) return;
-      held = false;
-      controller().setPushToTalk(false);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.code !== 'Space' || event.ctrlKey || event.metaKey || event.altKey) return;
-      if (held) {
-        // Auto-repeat while holding: keep the page from scrolling.
-        event.preventDefault();
-        return;
-      }
-      if (event.repeat || spaceBelongsToThePage(event.target)) return;
-      event.preventDefault();
-      held = true;
-      controller().setPushToTalk(true);
-    };
-    const onKeyUp = (event: KeyboardEvent) => {
-      if (event.code === 'Space') release();
-    };
-
-    window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('keyup', onKeyUp);
-    window.addEventListener('blur', release);
+    // Capture phase: a component that stops propagation must not leave the microphone stuck open.
+    window.addEventListener('keydown', keys.keydown, true);
+    window.addEventListener('keyup', keys.keyup, true);
+    window.addEventListener('blur', keys.release);
     return () => {
-      window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('keyup', onKeyUp);
-      window.removeEventListener('blur', release);
-      release();
+      window.removeEventListener('keydown', keys.keydown, true);
+      window.removeEventListener('keyup', keys.keyup, true);
+      window.removeEventListener('blur', keys.release);
+      keys.release();
     };
   }, [enabled]);
 }
