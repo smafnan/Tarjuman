@@ -277,7 +277,7 @@ describe('server over a real socket', () => {
     if (process.platform === 'win32') {
       // File modes mean nothing on Windows: the protection is the access-control list.
       const owner = await currentUserSid();
-      const acl = await windowsAcl(file);
+      const acl = await windowsAcl(file, owner);
       expect(acl.protected, acl.sddl).toBe(true);
       expect(acl.entries, acl.sddl).toContainEqual({ trustee: owner, rights: 'FA', inherited: false });
       expect(entriesBeyondOwner(acl, owner), acl.sddl).toEqual([]);

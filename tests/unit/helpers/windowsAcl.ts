@@ -29,18 +29,39 @@ export interface WindowsAcl {
   sddl: string;
 }
 
-export async function windowsAcl(file: string): Promise<WindowsAcl> {
+/**
+ * SDDL writes two accounts of this computer as abbreviations: its built-in Administrator
+ * (LA, RID 500, the account GitHub's Windows machines run as) and its built-in Guest (LG,
+ * RID 501). They are spelled out with the computer's own SID prefix, taken from the owner's
+ * SID, so that an entry can be compared with the owner.
+ */
+function spellOut(trustee: string, ownerSid: string): string {
+  const computer = ownerSid.replace(/-\d+$/, '');
+  if (trustee === 'LA') return `${computer}-500`;
+  if (trustee === 'LG') return `${computer}-501`;
+  return trustee;
+}
+
+/** The access list of an SDDL string such as `D:PAI(A;;FA;;;SY)(A;;FA;;;S-1-5-21-…)`. */
+export function parseSddl(sddl: string, ownerSid: string): WindowsAcl {
+  const entries = [...sddl.matchAll(/\(([^;()]*);([^;()]*);([^;()]*);[^;()]*;[^;()]*;([^;()]*)\)/g)].map(
+    ([, , flags = '', rights = '', trustee = '']) => ({
+      trustee: spellOut(trustee, ownerSid),
+      rights,
+      inherited: flags.includes('ID'),
+    }),
+  );
+  return { protected: /^D:P/.test(sddl), entries, sddl };
+}
+
+export async function windowsAcl(file: string, ownerSid: string): Promise<WindowsAcl> {
   const dir = await mkdtemp(path.join(tmpdir(), 'tarjuman-acl-'));
   try {
     const saved = path.join(dir, 'acl.txt');
     await run(path.join(system32, 'icacls.exe'), [file, '/save', saved]);
     // icacls writes the file name on the first line and the access list on the second.
     const text = (await readFile(saved)).toString('utf16le').replace(/^\uFEFF/, '');
-    const sddl = text.split(/\r?\n/)[1]?.trim() ?? '';
-    const entries = [...sddl.matchAll(/\(([^;()]*);([^;()]*);([^;()]*);[^;()]*;[^;()]*;([^;()]*)\)/g)].map(
-      ([, , flags = '', rights = '', trustee = '']) => ({ trustee, rights, inherited: flags.includes('ID') }),
-    );
-    return { protected: /^D:P/.test(sddl), entries, sddl };
+    return parseSddl(text.split(/\r?\n/)[1]?.trim() ?? '', ownerSid);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

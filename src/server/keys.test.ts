@@ -235,7 +235,7 @@ describe('KeyStore file protection', () => {
       await restrictToCurrentUser(file);
 
       const owner = await currentUserSid();
-      const acl = await windowsAcl(file);
+      const acl = await windowsAcl(file, owner);
       expect(entriesBeyondOwner(acl, owner), acl.sddl).toEqual([]);
       expect(acl.entries, acl.sddl).toContainEqual({ trustee: owner, rights: 'FA', inherited: false });
     },
@@ -267,14 +267,14 @@ describe('KeyStore file protection', () => {
       expect(keys.problems).toEqual([]);
 
       const owner = await currentUserSid();
-      const acl = await windowsAcl(keysFile());
+      const acl = await windowsAcl(keysFile(), owner);
       expect(acl.protected, acl.sddl).toBe(true);
       expect(acl.entries, acl.sddl).toContainEqual({ trustee: owner, rights: 'FA', inherited: false });
       expect(entriesBeyondOwner(acl, owner), acl.sddl).toEqual([]);
 
       // A second save replaces the file and must give the new one the same protection.
       await keys.update({ BETA_KEY: BETA });
-      expect((await windowsAcl(keysFile())).entries).toEqual(acl.entries);
+      expect((await windowsAcl(keysFile(), owner)).entries).toEqual(acl.entries);
       expect(JSON.parse(await readFile(keysFile(), 'utf8'))).toEqual({ ALPHA_KEY: ALPHA, BETA_KEY: BETA });
     },
   );
