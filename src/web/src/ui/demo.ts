@@ -46,7 +46,7 @@ function provider(
 
 const SERVER: ServerInfo = {
   name: 'tarjuman',
-  version: '2.0.0',
+  version: '2.0.1',
   protocol: 1,
   keysWritable: true,
   authRequired: false,

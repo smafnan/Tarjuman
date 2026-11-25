@@ -1,6 +1,6 @@
 {
   "name": "tarjuman",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "private": true,
   "description": "Tarjuman — live Urdu ⇄ German voice interpreter for Microsoft Teams calls (free-tier proof of concept)",
   "type": "module",

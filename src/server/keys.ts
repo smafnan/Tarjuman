@@ -52,9 +52,19 @@ async function exists(file: string): Promise<boolean> {
 }
 
 /**
+ * Groups through which other accounts on the same computer get access: Everyone,
+ * Authenticated Users, Users, Interactive, Guests. By security identifier, because their
+ * names depend on the language of Windows.
+ */
+const BROAD_GROUPS = ['*S-1-1-0', '*S-1-5-11', '*S-1-5-32-545', '*S-1-5-4', '*S-1-5-32-546'];
+
+/**
  * Windows ignores file modes: a new file inherits the folder's ACL, which on a non-system
- * drive usually lets every local account read it. Drop the inherited entries and grant the
- * current account alone. Throws when icacls fails; the caller decides how much that matters.
+ * drive usually lets every local account read it. Drop the inherited entries, grant the
+ * current account, and remove whatever the broad groups were given explicitly. What may stay
+ * is SYSTEM and the Administrators, which can read every file anyway (the rule OpenSSH for
+ * Windows applies to private keys). Throws when icacls fails; the caller decides how much
+ * that matters.
  */
 export async function restrictToCurrentUser(
   file: string,
@@ -65,7 +75,7 @@ export async function restrictToCurrentUser(
   const account = env.USERDOMAIN ? `${env.USERDOMAIN}\\${username}` : username;
   await execFileAsync(
     path.join(root, 'System32', 'icacls.exe'),
-    [file, '/inheritance:r', '/grant:r', `${account}:F`],
+    [file, '/inheritance:r', '/grant:r', `${account}:F`, '/remove:g', ...BROAD_GROUPS],
     { windowsHide: true, timeout: 10_000 },
   );
 }

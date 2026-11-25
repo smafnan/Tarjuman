@@ -1,16 +1,15 @@
-import { execFile } from 'node:child_process';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { request as httpRequest } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { tmpdir, userInfo } from 'node:os';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { promisify } from 'node:util';
 
 import type { FastifyInstance } from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 
 import { tonePcm, waitFor } from '../../../tests/unit/helpers';
+import { currentUserSid, entriesBeyondOwner, windowsAcl } from '../../../tests/unit/helpers/windowsAcl';
 import type { DiagnosticsReport, KeysResponse } from '../../shared/api';
 import {
   decodeBinaryFrame,
@@ -26,8 +25,6 @@ import { loadConfig } from '../config';
 import { AbortedError } from '../providers/chain';
 import { createServices, type Services } from '../services';
 import { buildApp } from './app';
-
-const run = promisify(execFile);
 
 /** The real server, on a real socket, with the offline mock providers. */
 interface Running {
@@ -278,16 +275,12 @@ describe('server over a real socket', () => {
     const file = path.join(server.dataDir, 'keys.json');
     expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ GROQ_API_KEY: secret });
     if (process.platform === 'win32') {
-      // File modes mean nothing on Windows: the protection is the ACL, so ask icacls.
-      const root = process.env.SystemRoot ?? 'C:\\Windows';
-      const { stdout } = await run(path.join(root, 'System32', 'icacls.exe'), [file]);
-      const entries = stdout
-        .split(/\r?\n/)
-        .map((line) => line.replace(file, '').trim())
-        .filter((line) => /:\(/.test(line));
-      expect(entries).toHaveLength(1);
-      expect(entries[0]).not.toContain('(I)');
-      expect(entries[0]?.toLowerCase()).toContain(userInfo().username.toLowerCase());
+      // File modes mean nothing on Windows: the protection is the access-control list.
+      const owner = await currentUserSid();
+      const acl = await windowsAcl(file);
+      expect(acl.protected, acl.sddl).toBe(true);
+      expect(acl.entries, acl.sddl).toContainEqual({ trustee: owner, rights: 'FA', inherited: false });
+      expect(entriesBeyondOwner(acl, owner), acl.sddl).toEqual([]);
     } else {
       expect((await stat(file)).mode & 0o777).toBe(0o600);
     }

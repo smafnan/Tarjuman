@@ -6,7 +6,8 @@ import { promisify } from 'node:util';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { KeyStore, type KeyDefinition } from './keys';
+import { currentUserSid, entriesBeyondOwner, windowsAcl } from '../../tests/unit/helpers/windowsAcl';
+import { KeyStore, restrictToCurrentUser, type KeyDefinition } from './keys';
 
 const run = promisify(execFile);
 
@@ -37,16 +38,6 @@ const keysFile = () => path.join(dir, 'keys.json');
 
 function errno(code: string): Error {
   return Object.assign(new Error(code), { code });
-}
-
-/** The access-control entries icacls prints, one per account: independent of the Windows language. */
-async function aclEntries(file: string): Promise<string[]> {
-  const root = process.env.SystemRoot ?? 'C:\\Windows';
-  const { stdout } = await run(path.join(root, 'System32', 'icacls.exe'), [file]);
-  return stdout
-    .split(/\r?\n/)
-    .map((line) => line.replace(file, '').trim())
-    .filter((line) => /:\(/.test(line));
 }
 
 describe('KeyStore.load', () => {
@@ -223,6 +214,33 @@ describe('KeyStore file protection', () => {
     expect(keys.problems[0]).toMatch(/other accounts/);
   });
 
+  it.skipIf(process.platform !== 'win32')(
+    'on Windows also removes access that other accounts were given explicitly',
+    async () => {
+      const file = path.join(dir, 'explicit.json');
+      await writeFile(file, '{}');
+      const icacls = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'icacls.exe');
+      // Everyone, Authenticated Users, Users: as some folders and tools hand them out. SYSTEM and
+      // the Administrators as well, which is what new files get on GitHub's Windows machines.
+      await run(icacls, [
+        file,
+        '/grant',
+        '*S-1-1-0:R',
+        '*S-1-5-11:M',
+        '*S-1-5-32-545:R',
+        '*S-1-5-18:F',
+        '*S-1-5-32-544:F',
+      ]);
+
+      await restrictToCurrentUser(file);
+
+      const owner = await currentUserSid();
+      const acl = await windowsAcl(file);
+      expect(entriesBeyondOwner(acl, owner), acl.sddl).toEqual([]);
+      expect(acl.entries, acl.sddl).toContainEqual({ trustee: owner, rights: 'FA', inherited: false });
+    },
+  );
+
   it('does not run the ACL step on other platforms', async () => {
     let called = false;
     const keys = store({
@@ -242,21 +260,21 @@ describe('KeyStore file protection', () => {
 
   // Real icacls on a real file: this is what keeps other local accounts from reading the keys.
   it.skipIf(process.platform !== 'win32')(
-    'on Windows leaves only the current account on the saved file, and no inherited entries',
+    'on Windows leaves the saved file to the current account, without inherited entries',
     async () => {
       const keys = store();
       await keys.update({ ALPHA_KEY: ALPHA });
       expect(keys.problems).toEqual([]);
 
-      const entries = await aclEntries(keysFile());
-      expect(entries).toHaveLength(1);
-      expect(entries[0]).not.toContain('(I)');
-      expect(entries[0]?.toLowerCase()).toContain(os.userInfo().username.toLowerCase());
-      expect(entries[0]).toMatch(/\(F\)/);
+      const owner = await currentUserSid();
+      const acl = await windowsAcl(keysFile());
+      expect(acl.protected, acl.sddl).toBe(true);
+      expect(acl.entries, acl.sddl).toContainEqual({ trustee: owner, rights: 'FA', inherited: false });
+      expect(entriesBeyondOwner(acl, owner), acl.sddl).toEqual([]);
 
       // A second save replaces the file and must give the new one the same protection.
       await keys.update({ BETA_KEY: BETA });
-      expect(await aclEntries(keysFile())).toEqual(entries);
+      expect((await windowsAcl(keysFile())).entries).toEqual(acl.entries);
       expect(JSON.parse(await readFile(keysFile(), 'utf8'))).toEqual({ ALPHA_KEY: ALPHA, BETA_KEY: BETA });
     },
   );
