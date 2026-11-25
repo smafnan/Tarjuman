@@ -35,9 +35,10 @@ export interface HttpClient {
   /**
    * Make sure a connection to the host of `url` is open, by fetching `url` without any
    * credentials and discarding the answer. Does nothing when the host was used a moment ago.
-   * Never throws and never rejects.
+   * Never throws and never rejects. Resolves once the connection is back in the pool, ready
+   * for the next request (or the attempt failed); callers that only want the hint ignore it.
    */
-  warm(url: string): void;
+  warm(url: string): Promise<void>;
   /** Plain sentences about settings that could not be used (a proxy address that is not one). */
   readonly problems: readonly string[];
   close(): Promise<void>;
@@ -139,7 +140,8 @@ export function createHttpClient(options: HttpClientOptions = {}): HttpClient {
 
   /** When each host last carried a request, to tell whether its connection is still warm. */
   const lastUse = new Map<string, number>();
-  const warming = new Set<string>();
+  /** Warm-ups under way, by origin: a second call joins the first instead of starting another. */
+  const warming = new Map<string, Promise<void>>();
   const touch = (origin: string | undefined) => {
     if (origin) lastUse.set(origin, now());
   };
@@ -149,6 +151,12 @@ export function createHttpClient(options: HttpClientOptions = {}): HttpClient {
     const origin = originOf(url);
     touch(origin);
     const body = init.body instanceof FormData ? toUndiciForm(init.body) : init.body;
+    // After an answer, undici waits one turn of the event loop before it gives the connection
+    // to the next request (to notice a server that closed it after all). A request made in
+    // that same turn, such as the translation right after the recognition on the same host,
+    // would get a new connection and pay for another TLS handshake. Waiting for that turn
+    // costs well under a millisecond.
+    await new Promise((resolve) => setImmediate(resolve));
     try {
       // The two fetch implementations describe the same shapes with different type names.
       return (await undiciFetch(url, { ...init, body, dispatcher } as never)) as unknown as Response;
@@ -157,17 +165,25 @@ export function createHttpClient(options: HttpClientOptions = {}): HttpClient {
     }
   }) as typeof fetch;
 
-  const warm = (url: string): void => {
+  const warm = (url: string): Promise<void> => {
     const origin = originOf(url);
-    if (!origin || warming.has(origin)) return;
-    if (now() - (lastUse.get(origin) ?? Number.NEGATIVE_INFINITY) < WARM_AFTER_IDLE_MS) return;
-    warming.add(origin);
-    undiciFetch(url, { method: 'GET', dispatcher, signal: AbortSignal.timeout(WARM_TIMEOUT_MS) })
+    if (!origin) return Promise.resolve();
+    const underWay = warming.get(origin);
+    if (underWay) return underWay;
+    if (now() - (lastUse.get(origin) ?? Number.NEGATIVE_INFINITY) < WARM_AFTER_IDLE_MS)
+      return Promise.resolve();
+    const attempt = undiciFetch(url, {
+      method: 'GET',
+      dispatcher,
+      signal: AbortSignal.timeout(WARM_TIMEOUT_MS),
+    })
       // The body has to be read to the end before the connection returns to the pool.
       .then((response) => response.arrayBuffer())
       .then(() => touch(origin))
       .catch(() => undefined)
       .finally(() => warming.delete(origin));
+    warming.set(origin, attempt);
+    return attempt;
   };
 
   return { fetch: send, warm, problems, close: () => dispatcher.close() };

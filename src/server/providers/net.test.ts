@@ -174,11 +174,26 @@ describe('provider HTTP client', () => {
 
   it('opens a connection ahead of the request, without credentials, and reuses it', async () => {
     const { origin, client } = await setup();
-    client.warm(`${origin.url}/models`);
-    await waitFor(() => origin.requests.length === 1, 'the warm-up request');
+    // Waiting for the request to arrive is not enough: until its answer has been read, the
+    // connection is still busy and a request sent now would open a second one.
+    const warmed = client.warm(`${origin.url}/models`);
+    // Asked again while the first is under way: it joins instead of opening another connection.
+    const again = client.warm(`${origin.url}/models`);
+    await Promise.all([warmed, again]);
+    expect(origin.requests).toHaveLength(1);
     expect(origin.requests[0]).toMatchObject({ method: 'GET', path: '/models', authorization: undefined });
 
     await (await client.fetch(`${origin.url}/real`, { headers: { authorization: 'Bearer k' } })).text();
+    expect(origin.connections()).toBe(1);
+  });
+
+  // The translation follows the recognition at once, often on the same host (Groq for both).
+  it('reuses the connection for a request sent right after the previous answer', async () => {
+    const { origin, client } = await setup();
+    for (const path of ['/recognize', '/translate', '/again']) {
+      await (await client.fetch(`${origin.url}${path}`)).text();
+    }
+    expect(origin.requests.map((request) => request.path)).toEqual(['/recognize', '/translate', '/again']);
     expect(origin.connections()).toBe(1);
   });
 
