@@ -4,6 +4,7 @@ import {
   clearTranscript,
   dismissNotice,
   initialChannelRuntime,
+  isInterpreted,
   mergeDeep,
   sanitizeLocalSettings,
   useAppStore,
@@ -217,7 +218,7 @@ export function replaySample() {
   stopSample();
   const sample = TRANSCRIPT.filter((item) => item.status === 'done' && !item.error);
   const start = Date.now();
-  useAppStore.setState({ transcript: [], notices: [] });
+  useAppStore.setState({ transcript: [], interpreted: 0, lastDelayMs: null, notices: [] });
   sample.forEach((item, index) => {
     const createdAt = start + index * 3100;
     const id = `sample-${createdAt}-${index}`;
@@ -236,6 +237,8 @@ export function replaySample() {
         () => {
           useAppStore.setState((state) => ({
             transcript: state.transcript.map((row) => (row.id === id ? { ...item, id, createdAt } : row)),
+            interpreted: state.interpreted + 1,
+            lastDelayMs: item.latencyMs ?? state.lastDelayMs,
           }));
         },
         index * 3100 + 800,
@@ -293,15 +296,16 @@ const DIAGNOSTICS: DiagnosticsReport = {
       label: 'Google · gemini-3.5-flash-lite (audio)',
       outcome: 'ok',
       ms: 912,
-      detail: 'key and model accepted',
+      detail: 'connection OK; heard no words in a tone without speech',
     },
     {
       kind: 'stt',
       id: 'groq-whisper-large-v3',
       label: 'Groq · whisper-large-v3',
-      outcome: 'ok',
+      outcome: 'warning',
       ms: 431,
-      detail: 'key and model accepted',
+      detail:
+        'connection OK, but it heard words in a tone without speech ("Vielen Dank."): it may invent sentences from noise',
     },
     {
       kind: 'mt',
@@ -342,7 +346,8 @@ function standIn(): AppController {
       useAppStore.setState((state) => ({
         channels: { ...state.channels, outgoing: { ...state.channels.outgoing, pttHeld: held } },
       })),
-    sendText: nothing,
+    // Nothing is sent in the demo, so what was typed stays in the box.
+    sendText: () => false,
     updateSettings: (patch) =>
       useAppStore.setState((state) => ({
         settings: sanitizeLocalSettings(mergeDeep(state.settings, patch)),
@@ -413,6 +418,8 @@ export function loadDemo(): void {
           },
         },
     transcript: idle ? [] : TRANSCRIPT,
+    interpreted: idle ? 0 : TRANSCRIPT.filter((item) => isInterpreted(item.status)).length,
+    lastDelayMs: idle ? null : (TRANSCRIPT.findLast((item) => item.latencyMs !== null)?.latencyMs ?? null),
     devices: {
       inputs: [
         { deviceId: 'headset-in', label: 'Headset Microphone (Jabra Evolve2 65)', virtual: false },

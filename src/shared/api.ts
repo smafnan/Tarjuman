@@ -65,8 +65,11 @@ export interface DiagnosticResult {
   kind: ProviderKind;
   id: string;
   label: string;
-  /** `skipped` = not configured, nothing was sent. */
-  outcome: 'ok' | 'failed' | 'skipped';
+  /**
+   * `skipped` = not configured, nothing was sent. `warning` = it answered, so the connection
+   * works, but the answer is doubtful: a recognizer that heard words in a tone without speech.
+   */
+  outcome: 'ok' | 'warning' | 'failed' | 'skipped';
   ms: number;
   /** What came back (a transcript, a translation, audio size) or why it failed. */
   detail: string;

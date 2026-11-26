@@ -201,6 +201,13 @@ export interface AppState {
   channels: Record<ChannelId, ChannelRuntime>;
   /** Oldest first. */
   transcript: TranscriptEntry[];
+  /**
+   * How many sentences have come out interpreted (spoken, or shown when speaking is off) since
+   * the transcript was last cleared, those that have scrolled off the screen included.
+   */
+  interpreted: number;
+  /** How long the sentence most recently interpreted took, from its end to its voice. */
+  lastDelayMs: number | null;
   devices: DeviceState;
   /** Transient messages shown as toasts, newest last. */
   notices: Notice[];
@@ -233,8 +240,12 @@ export interface AppController {
   /** Push-to-talk: call with true on press and false on release (outgoing channel). */
   setPushToTalk(held: boolean): void;
 
-  /** Interpret typed text as if it had been spoken on `channel`. */
-  sendText(channel: ChannelId, text: string): void;
+  /**
+   * Interpret typed text as if it had been spoken on `channel`. Returns true once the server
+   * has it. Otherwise the text must stay where it was typed, so that sending it again is one
+   * press.
+   */
+  sendText(channel: ChannelId, text: string): boolean;
 
   /** Merge a patch into the local settings, persist it, and apply it live (devices, volumes, server session). */
   updateSettings(patch: DeepPartial<LocalSettings>): void;

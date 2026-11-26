@@ -381,7 +381,8 @@ describe('server over a real socket', () => {
       await fetch(`${server.http}/api/diagnostics`, { method: 'POST' })
     ).json()) as DiagnosticsReport;
     expect(report.results.map((r) => [r.kind, r.id, r.outcome])).toEqual([
-      ['stt', 'mock-stt', 'ok'],
+      // The fake recognizer makes a sentence out of any sound, the test tone included.
+      ['stt', 'mock-stt', 'warning'],
       ['mt', 'mock-mt', 'ok'],
       ['tts', 'mock-tts', 'ok'],
     ]);

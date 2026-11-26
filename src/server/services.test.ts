@@ -5,7 +5,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { loadConfig } from './config';
-import { createServices, selectProviders } from './services';
+import { createServices, judgeToneCheck, selectProviders } from './services';
 
 const dirs: string[] = [];
 
@@ -143,6 +143,19 @@ describe('how long a recognizer may take before a second one is started', () => 
     const s = await services({ MT_PROVIDERS: 'groq-gpt-oss-120b' });
     expect(s.chains.recognizerMayTranslate).toBe(false);
     expect(s.chains.sttHedgeMs?.(s.chains.stt.providers[0]!, 10_000)).toBe(2_500);
+  });
+});
+
+describe('the speech check', () => {
+  it('passes a recognizer that hears nothing in a tone without speech', () => {
+    expect(judgeToneCheck('  ')).toEqual({ outcome: 'ok', detail: expect.stringMatching(/^connection OK/) });
+  });
+
+  it('reports the connection apart from words invented out of the tone, and quotes them', () => {
+    const verdict = judgeToneCheck('Vielen Dank.');
+    expect(verdict.outcome).toBe('warning');
+    expect(verdict.detail).toMatch(/^connection OK, but/);
+    expect(verdict.detail).toContain('"Vielen Dank."');
   });
 });
 

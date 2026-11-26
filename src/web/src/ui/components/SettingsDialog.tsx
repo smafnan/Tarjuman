@@ -1,4 +1,13 @@
-import { CircleCheck, CircleMinus, CircleX, ExternalLink, Plus, Settings, Trash2 } from 'lucide-react';
+import {
+  CircleAlert,
+  CircleCheck,
+  CircleMinus,
+  CircleX,
+  ExternalLink,
+  Plus,
+  Settings,
+  Trash2,
+} from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 
 import type { DiagnosticsReport, KeysResponse, KeyStatus } from '../../../../shared/api';
@@ -127,6 +136,8 @@ function KeyCard({
 
 const OUTCOME = {
   ok: { icon: CircleCheck, label: 'OK' },
+  // It answered, so the key works; the detail says what was doubtful about the answer.
+  warning: { icon: CircleAlert, label: 'Connected' },
   failed: { icon: CircleX, label: 'Failed' },
   skipped: { icon: CircleMinus, label: 'Not set up' },
 } as const;
@@ -154,7 +165,11 @@ function Diagnostics() {
         <button type="button" className="button" disabled={busy} onClick={() => void run()}>
           {busy ? <Spinner /> : null} Test providers
         </button>
-        <span className="muted small">Sends one small real request to each provider that is set up.</span>
+        <span className="muted small">
+          Sends one small real request to each provider that is set up. Speech recognition is sent a tone
+          without words: that shows whether it answers and whether it invents words, not how well it
+          recognizes speech.
+        </span>
       </div>
       {error ? <p className="field__note field__note--danger">{error}</p> : null}
       {report ? (

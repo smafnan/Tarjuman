@@ -37,7 +37,8 @@ npm start
 Open **http://localhost:8787**.
 
 On Windows you can instead double-click **start-tarjuman.cmd** in the project folder. It
-installs and builds what is missing the first time, starts the server and opens the browser.
+installs and builds what is missing or out of date (the first time, and after an update),
+starts the server and opens the browser.
 
 Settings can go in a file named `.env` (see [.env.example](.env.example)); you do not need
 one to start. To create it, run `Copy-Item .env.example .env` in PowerShell (`cp .env.example .env`

@@ -7,6 +7,7 @@ import {
   type AppState,
   type ChannelRuntime,
   type DeepPartial,
+  type EntryStatus,
   type LocalSettings,
   type Notice,
   type NoticeLevel,
@@ -165,6 +166,8 @@ export function initialState(): AppState {
     providers: { stt: [], mt: [], tts: [] },
     channels: { outgoing: initialChannelRuntime(), incoming: initialChannelRuntime() },
     transcript: [],
+    interpreted: 0,
+    lastDelayMs: null,
     devices: {
       inputs: [],
       outputs: [],
@@ -204,14 +207,24 @@ export function patchChannel(channel: ChannelId, patch: Partial<ChannelRuntime>)
  */
 let scrolledOut: TranscriptEntry[] = [];
 
+/** A sentence counts as interpreted once it is being spoken, or is done. */
+export function isInterpreted(status: EntryStatus): boolean {
+  return status === 'speaking' || status === 'done';
+}
+
 export function addEntry(entry: TranscriptEntry): void {
-  const transcript = [...useAppStore.getState().transcript, entry];
+  const state = useAppStore.getState();
+  const transcript = [...state.transcript, entry];
   if (transcript.length > MAX_TRANSCRIPT_ENTRIES) {
     const removed = transcript.splice(0, transcript.length - MAX_TRANSCRIPT_ENTRIES);
     // Only what an export would contain is worth keeping: words that were understood.
     for (const old of removed) if (old.sourceText && old.status !== 'dropped') scrolledOut.push(old);
   }
-  useAppStore.setState({ transcript });
+  useAppStore.setState({
+    transcript,
+    interpreted: state.interpreted + (isInterpreted(entry.status) ? 1 : 0),
+    lastDelayMs: entry.latencyMs ?? state.lastDelayMs,
+  });
 }
 
 /** Everything that was said since the transcript was last cleared, oldest first. */
@@ -219,10 +232,10 @@ export function transcriptForExport(): TranscriptEntry[] {
   return [...scrolledOut, ...useAppStore.getState().transcript];
 }
 
-/** Empty the transcript, on screen and in what is kept for the export. */
+/** Empty the transcript, on screen and in what is kept for the export, and its totals. */
 export function clearTranscript(): void {
   scrolledOut = [];
-  useAppStore.setState({ transcript: [] });
+  useAppStore.setState({ transcript: [], interpreted: 0, lastDelayMs: null });
 }
 
 /** Update one entry. `patch` may be a function of the current entry. Unknown ids are ignored. */
@@ -237,7 +250,13 @@ export function patchEntry(
     const next = { ...current, ...(typeof patch === 'function' ? patch(current) : patch) };
     const transcript = state.transcript.slice();
     transcript[index] = next;
-    return { transcript };
+    return {
+      transcript,
+      // Counted once: the first time the sentence comes out interpreted.
+      interpreted: state.interpreted + (!isInterpreted(current.status) && isInterpreted(next.status) ? 1 : 0),
+      lastDelayMs:
+        next.latencyMs !== null && next.latencyMs !== current.latencyMs ? next.latencyMs : state.lastDelayMs,
+    };
   });
 }
 

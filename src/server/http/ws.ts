@@ -106,12 +106,13 @@ export class ConnectionHub {
       transport: {
         send,
         sendBinary: (frame) => {
-          if (socket.readyState !== socket.OPEN) return;
+          if (socket.readyState !== socket.OPEN) return false;
           if (socket.bufferedAmount > MAX_BUFFERED_BYTES) {
             log.warn({ buffered: socket.bufferedAmount }, 'browser is not reading; dropping audio');
-            return;
+            return false;
           }
           socket.send(frame, { binary: true });
+          return true;
         },
       },
     });

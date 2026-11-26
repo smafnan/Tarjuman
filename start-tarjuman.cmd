@@ -1,6 +1,7 @@
 @echo off
 rem Starts Tarjuman on Windows: double-click this file.
-rem The first start installs and builds everything, which takes a few minutes.
+rem The first start, and the first start after an update, install and build what changed,
+rem which takes a few minutes.
 cd /d "%~dp0"
 
 where node >nul 2>nul
@@ -10,17 +11,9 @@ if errorlevel 1 (
   goto :failed
 )
 
-if not exist "node_modules" (
-  echo Installing Tarjuman. This happens only once...
-  call npm install
-  if errorlevel 1 goto :failed
-)
-
-if not exist "dist\web\index.html" (
-  echo Building Tarjuman. This happens only once...
-  call npm run build
-  if errorlevel 1 goto :failed
-)
+rem Install and build what is missing or older than the files in this folder.
+node scripts\launch.mjs
+if errorlevel 1 goto :failed
 
 call npm start -- --open
 if errorlevel 1 goto :failed

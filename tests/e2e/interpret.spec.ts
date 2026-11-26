@@ -62,7 +62,10 @@ test('settings: keys, diagnostics and language pair', async ({ page }) => {
 
   await expect(dialog.getByText('Groq', { exact: true })).toBeVisible();
   await dialog.getByRole('button', { name: 'Test providers' }).click();
-  await expect(dialog.getByRole('cell', { name: 'OK' })).toHaveCount(3);
+  // The fake recognizer makes a sentence out of the test tone, and the check says so.
+  // Exact: the details say "connection OK" too.
+  await expect(dialog.getByRole('cell', { name: 'OK', exact: true })).toHaveCount(2);
+  await expect(dialog.getByRole('cell', { name: 'Connected', exact: true })).toHaveCount(1);
 
   await dialog.getByRole('tab', { name: 'Languages & style' }).click();
   // Typing with spaces must survive (the stored copy is trimmed on every keystroke).

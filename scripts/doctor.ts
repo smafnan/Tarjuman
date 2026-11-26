@@ -20,6 +20,7 @@ const useColor = process.stdout.isTTY && !process.env.NO_COLOR;
 const paint = (code: number, text: string) => (useColor ? `\u001b[${code}m${text}\u001b[0m` : text);
 const green = (text: string) => paint(32, text);
 const red = (text: string) => paint(31, text);
+const yellow = (text: string) => paint(33, text);
 const dim = (text: string) => paint(2, text);
 const bold = (text: string) => paint(1, text);
 
@@ -31,9 +32,13 @@ const KIND_TITLE: Record<ProviderKind, string> = {
 
 const MARK: Record<DiagnosticResult['outcome'], string> = {
   ok: green('OK  '),
+  warning: yellow('WARN'),
   failed: red('FAIL'),
   skipped: dim('skip'),
 };
+
+/** Answered: a warning is about the quality of the answer, not about the connection. */
+const works = (result: DiagnosticResult) => result.outcome === 'ok' || result.outcome === 'warning';
 
 const ADVICE: Record<ProviderKind, string> = {
   stt: 'add GROQ_API_KEY (free, https://console.groq.com/keys) or GEMINI_API_KEY (free, https://aistudio.google.com/apikey) to .env or under Settings in the app',
@@ -71,7 +76,7 @@ async function main(): Promise<number> {
   const missing: ProviderKind[] = [];
   for (const kind of kinds) {
     const results = report.results.filter((result) => result.kind === kind);
-    if (!results.some((result) => result.outcome === 'ok')) missing.push(kind);
+    if (!results.some(works)) missing.push(kind);
     if (json) continue;
     console.log(bold(`\n${KIND_TITLE[kind]}`));
     // The id in brackets is what STT_PROVIDERS / MT_PROVIDERS / TTS_PROVIDERS expect.
@@ -87,6 +92,13 @@ async function main(): Promise<number> {
   }
 
   if (!json) {
+    if (report.results.some((result) => result.kind === 'stt' && works(result))) {
+      console.log(
+        dim(
+          '\n  Speech recognition was sent a tone without words: this shows that it answers and whether it\n  invents words, not how well it recognizes speech.',
+        ),
+      );
+    }
     console.log('');
     if (missing.length === 0) {
       console.log(green('Everything needed for a call is working.'));

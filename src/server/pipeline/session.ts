@@ -48,7 +48,11 @@ export interface SessionLogger {
 
 export interface SessionTransport {
   send(message: ServerMessage): void;
-  sendBinary(frame: Uint8Array): void;
+  /**
+   * Returns false when the frame could not be handed to the browser (it has stopped reading,
+   * or the connection is gone). The sentence is then reported as not fully spoken.
+   */
+  sendBinary(frame: Uint8Array): boolean;
 }
 
 export interface PipelineChains {
@@ -414,14 +418,14 @@ export class InterpreterSession {
     // Hand over to the speech lane and return, so the next utterance can be translated now.
     this.onSpeechLane(utterance, async () => {
       const waited = this.now() - (utterance.translatedAt ?? this.now());
-      let late = false;
+      let notSpoken: 'late' | 'incomplete' | undefined;
       if (!utterance.settings.speak) {
         // Captions only.
       } else if (waited > MAX_SPEECH_DELAY_MS) {
-        late = true;
+        notSpoken = 'late';
         this.logger.warn({ id, channel, waitedMs: waited }, 'speech skipped: the voice fell too far behind');
-      } else {
-        await this.speak(utterance, spoken);
+      } else if (!(await this.speak(utterance, spoken))) {
+        notSpoken = 'incomplete';
       }
       this.finish(utterance);
       const timings: UtteranceTimings = { ...utterance.timings, totalMs: this.now() - utterance.receivedAt };
@@ -432,19 +436,26 @@ export class InterpreterSession {
         id,
         channel,
         timings,
-        ...(late ? { notSpoken: 'late' } : {}),
+        ...(notSpoken ? { notSpoken } : {}),
       });
       this.logger.debug({ id, channel, ...timings }, 'utterance done');
     });
   }
 
-  private async speak(utterance: Utterance, text: string): Promise<void> {
+  /**
+   * Synthesize and send the speech of one translation. Returns false when some of it could
+   * not be handed to the browser: the caption is complete, but what was heard is not. The
+   * remaining chunks are still sent (the browser plays whatever arrives, in order), so that a
+   * short stall costs a gap in the sentence, not its whole end.
+   */
+  private async speak(utterance: Utterance, text: string): Promise<boolean> {
     const { id, channel, settings } = utterance;
     const lang = settings.targetLang;
     // A chunk without a letter or a digit ("…", "—") gives a voice nothing to say; the
     // services answer it with an error, which would rest the provider for no reason.
     const chunks = splitForSpeech(text, lang).filter((chunk) => /[\p{L}\p{N}]/u.test(chunk));
-    if (chunks.length === 0) return;
+    if (chunks.length === 0) return true;
+    let delivered = true;
 
     const rate = effectiveSpeechRate(settings.speechRate, this.currentLag(channel));
     const voice = settings.voice === 'auto' ? undefined : settings.voice;
@@ -484,9 +495,9 @@ export class InterpreterSession {
         speaking.abort();
         throw this.stageFailure('tts', error);
       }
-      if (this.closed) return;
+      if (this.closed) return delivered;
       if (index === 0) utterance.timings.ttsFirstChunkMs = this.now() - startedAt;
-      this.transport.sendBinary(
+      const sent = this.transport.sendBinary(
         encodeBinaryFrame(
           {
             type: 'utterance.speech',
@@ -503,8 +514,13 @@ export class InterpreterSession {
           run.value.audio,
         ),
       );
+      if (!sent) {
+        delivered = false;
+        this.logger.warn({ id, channel, index, of: chunks.length }, 'a chunk of speech was not delivered');
+      }
     }
     utterance.timings.ttsMs = this.now() - startedAt;
+    return delivered;
   }
 
   // -------------------------------------------------------------------------------------

@@ -270,6 +270,21 @@ function diagnosticAudio(): Int16Array {
 
 const DIAGNOSTIC_TIMEOUT_MS = 15_000;
 
+/**
+ * The speech check sends a tone without words, so its answer tells two things apart: the
+ * connection (the key and the model accepted the request) and false speech (a recognizer
+ * that hears words in sound that has none). It does not measure how well real speech is
+ * recognized, and says nothing that would suggest it does.
+ */
+export function judgeToneCheck(heard: string): Pick<DiagnosticResult, 'outcome' | 'detail'> {
+  const words = heard.trim();
+  if (!words) return { outcome: 'ok', detail: 'connection OK; heard no words in a tone without speech' };
+  return {
+    outcome: 'warning',
+    detail: `connection OK, but it heard words in a tone without speech ("${words.slice(0, 60)}"): it may invent sentences from noise`,
+  };
+}
+
 async function probe(provider: AnyProvider): Promise<DiagnosticResult> {
   const base = { kind: provider.kind, id: provider.id, label: provider.label };
   if (!provider.isConfigured()) {
@@ -285,6 +300,7 @@ async function probe(provider: AnyProvider): Promise<DiagnosticResult> {
   const startedAt = Date.now();
   try {
     let detail: string;
+    let outcome: DiagnosticResult['outcome'] = 'ok';
     if (provider.kind === 'stt') {
       const result = await provider.transcribe({
         pcm: diagnosticAudio(),
@@ -293,10 +309,7 @@ async function probe(provider: AnyProvider): Promise<DiagnosticResult> {
         hints: [],
         signal,
       });
-      // The test tone is not speech; an empty transcript is the correct answer.
-      detail = result.text
-        ? `key and model accepted (heard: "${result.text.slice(0, 60)}")`
-        : 'key and model accepted';
+      ({ outcome, detail } = judgeToneCheck(result.text));
     } else if (provider.kind === 'mt') {
       const result = await provider.translate({
         text: 'Guten Morgen, können Sie mich gut hören?',
@@ -320,7 +333,7 @@ async function probe(provider: AnyProvider): Promise<DiagnosticResult> {
       });
       detail = `${Math.round(result.audio.byteLength / 1024)} kB of ${result.mime} (${result.voice})`;
     }
-    return { ...base, outcome: 'ok', ms: Date.now() - startedAt, detail };
+    return { ...base, outcome, ms: Date.now() - startedAt, detail };
   } catch (error) {
     const detail = signal.aborted
       ? 'no answer within 15 s'

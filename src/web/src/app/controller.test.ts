@@ -112,7 +112,7 @@ describe('a saved output device and a microphone permission that arrives with th
     env.permission = false;
     await controller.refreshDevices();
     // Typing builds the buses; without a permission the saved device is refused.
-    controller.sendText('outgoing', 'Guten Tag');
+    expect(controller.sendText('outgoing', 'Guten Tag')).toBe(true);
     await tick();
     const outgoing = contexts()[0]!;
     expect(outgoing.sinkId).toBe('');
@@ -531,7 +531,7 @@ describe('latency badge', () => {
 describe('a translation that the server did not speak', () => {
   it('is marked, so that nobody assumes the other side heard it', async () => {
     const { browser, app, socket } = await runningCall();
-    for (const notSpoken of [undefined, 'late'] as const) {
+    for (const notSpoken of [undefined, 'late', 'incomplete'] as const) {
       say(browser.detectors[0], 20, 30);
       const { id } = socket.utterances.at(-1)!;
       socket.say({
@@ -553,9 +553,10 @@ describe('a translation that the server did not speak', () => {
       });
       socket.say({ type: 'utterance.done', id, channel: 'outgoing', timings: { totalMs: 1 }, notSpoken });
     }
-    const [spoken, skipped] = app.useAppStore.getState().transcript;
+    const [spoken, skipped, partly] = app.useAppStore.getState().transcript;
     expect(spoken).toMatchObject({ status: 'done', error: null });
     expect(skipped).toMatchObject({ status: 'done', error: expect.stringMatching(/not spoken/) });
+    expect(partly).toMatchObject({ status: 'done', error: expect.stringMatching(/partly spoken/) });
   });
 });
 
@@ -768,12 +769,13 @@ describe('reconnect in the middle of a call', () => {
     // A sentence spoken while reconnecting is lost, and the page says so.
     say(browser.detectors[0]);
     say(browser.detectors[0]);
-    controller.sendText('outgoing', 'Hallo');
+    // Typed text is not lost either: the typing box keeps it, because the server does not have it.
+    expect(controller.sendText('outgoing', 'Hallo')).toBe(false);
     let state = app.useAppStore.getState();
     expect(state.transcript).toHaveLength(3);
     expect(state.notices.map((notice) => notice.message)).toEqual([
       'Not connected to the server, so speech is not being interpreted right now.',
-      'The text was not sent because the server was not connected. Send it again once the connection is back.',
+      'The text was not sent because the server was not connected. It is still in the typing box: send it again once the connection is back.',
     ]);
 
     // Back again.
@@ -785,7 +787,7 @@ describe('reconnect in the middle of a call', () => {
     expect(state.connection).toBe('connected');
     // "Not being interpreted right now" is no longer true; that the text was not sent still is.
     expect(state.notices.map((notice) => notice.message)).toEqual([
-      'The text was not sent because the server was not connected. Send it again once the connection is back.',
+      'The text was not sent because the server was not connected. It is still in the typing box: send it again once the connection is back.',
     ]);
     expect(second.json[0]).toMatchObject({ type: 'session.start', settings: state.settings.session });
 

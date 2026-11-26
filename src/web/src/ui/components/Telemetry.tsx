@@ -1,25 +1,16 @@
-import { useShallow } from 'zustand/react/shallow';
-
 import { useAppStore } from '../../state/store';
 import { formatSeconds } from '../lib/format';
 
 /**
  * Two measurements of the conversation so far, between the two sides of the console: how long
  * the last sentence took to come out interpreted, and how many sentences have been. Each
- * figure rises in again when it changes (its value is its key).
+ * figure rolls in again when it changes (its value is its key). Both are running totals kept
+ * by the store: the on-screen transcript keeps only its newest rows, and recounting it would
+ * run on every update of the store, the audio levels included.
  */
 export function Telemetry() {
-  const { delay, count } = useAppStore(
-    useShallow((state) => {
-      let delay: number | null = null;
-      let count = 0;
-      for (const entry of state.transcript) {
-        if (entry.status === 'done' || entry.status === 'speaking') count += 1;
-        if (entry.latencyMs !== null) delay = entry.latencyMs;
-      }
-      return { delay, count };
-    }),
-  );
+  const delay = useAppStore((state) => state.lastDelayMs);
+  const count = useAppStore((state) => state.interpreted);
 
   return (
     <dl className="telemetry">

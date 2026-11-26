@@ -40,7 +40,13 @@ const SENTENCE: Record<LangCode, string> = {
 function harness(
   scripts: { stt?: SttScript; mt?: MtScript; tts?: TtsScript } = {},
   settings?: SessionSettings,
-  options: { recognizerMayTranslate?: boolean; now?: () => number; ttsTimeoutMs?: number } = {},
+  options: {
+    recognizerMayTranslate?: boolean;
+    now?: () => number;
+    ttsTimeoutMs?: number;
+    /** Chunks of speech the transport fails to deliver, as the browser would not read them. */
+    undelivered?: (header: SpeechChunkHeader) => boolean;
+  } = {},
 ) {
   /** Providers that were told a request is coming, in order. */
   const prepared: string[] = [];
@@ -123,8 +129,10 @@ function harness(
       sendBinary: (frame) => {
         const decoded = decodeBinaryFrame(frame);
         const header = decoded.header as SpeechChunkHeader;
+        if (options.undelivered?.(header)) return false;
         speech.push({ header, text: new TextDecoder().decode(decoded.payload) });
         order.push(`speech:${header.id}#${header.index}`);
+        return true;
       },
     },
   });
@@ -408,6 +416,33 @@ describe('InterpreterSession', () => {
       h.speech.map((_, i) => i === h.speech.length - 1),
     );
     expect(h.speech.map((chunk) => chunk.text).join(' ')).toBe(long);
+  });
+
+  it('says when only part of a voice reached the browser, though its last chunk did', async () => {
+    const long = Array.from(
+      { length: 8 },
+      (_, i) => `Das ist der Satz Nummer ${i + 1} in einer längeren Antwort.`,
+    ).join(' ');
+    const h = harness(
+      { mt: (request) => ({ translations: Object.fromEntries(request.targetLangs.map((l) => [l, long])) }) },
+      undefined,
+      { undelivered: (header) => header.id === 'u1' && header.index === 1 },
+    );
+    h.audio('u1');
+    h.audio('u2');
+    await h.session.idle();
+
+    const delivered = h.speech.filter((chunk) => chunk.header.id === 'u1');
+    expect(delivered.length).toBeGreaterThan(2);
+    expect(delivered.map((chunk) => chunk.header.index)).not.toContain(1);
+    // The end of the sentence still arrived: that alone must not make it count as spoken.
+    expect(delivered.at(-1)?.header.last).toBe(true);
+    // The caption is complete; what was heard is not, and the browser is told so.
+    expect(h.of('utterance.translation')[0]?.translations.de).toBe(long);
+    expect(h.of('utterance.done').map((event) => [event.id, event.notSpoken])).toEqual([
+      ['u1', 'incomplete'],
+      ['u2', undefined],
+    ]);
   });
 
   it('reports a failure of each stage exactly once, with the stage and a useful code', async () => {

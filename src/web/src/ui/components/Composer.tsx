@@ -18,10 +18,11 @@ export function Composer() {
   const connected = useAppStore((state) => state.connection === 'connected');
   const sourceLang = useAppStore((state) => state.settings.session.channels[channel].sourceLang);
 
+  // The box is emptied only once the server has the text: a connection lost at that moment
+  // must not cost what was typed.
   const send = () => {
     if (!text.trim() || !connected) return;
-    controller().sendText(channel, text);
-    setText('');
+    if (controller().sendText(channel, text)) setText('');
   };
 
   return (

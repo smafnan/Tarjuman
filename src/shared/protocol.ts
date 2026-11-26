@@ -191,11 +191,12 @@ export type ServerMessage =
       channel: ChannelId;
       timings: UtteranceTimings;
       /**
-       * Set when the translation was shown but deliberately not spoken: `late` means its turn
-       * came so long after it was translated that speaking it would only have delayed the
-       * sentences after it.
+       * Set when the translation was shown but not (fully) spoken. `late`: deliberately not
+       * spoken, because its turn came so long after it was translated that speaking it would
+       * only have delayed the sentences after it. `incomplete`: some of its speech could not
+       * be delivered to the browser (it had stopped reading), so only part of it was heard.
        */
-      notSpoken?: 'late';
+      notSpoken?: 'late' | 'incomplete';
     }
   | { type: 'utterance.dropped'; id: string; channel: ChannelId; reason: DropReason; detail?: string }
   | {

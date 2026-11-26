@@ -63,11 +63,34 @@ describe('transcript', () => {
     expect(transcriptForExport()[0]!.id).toBe('u2');
   });
 
+  it('counts every sentence once, when it first comes out interpreted, past what the screen keeps', () => {
+    addEntry(entry(0, { status: 'translating', latencyMs: null }));
+    expect(useAppStore.getState().interpreted).toBe(0);
+    patchEntry('u0', { status: 'speaking', latencyMs: 1_400 });
+    patchEntry('u0', { status: 'done' });
+    expect(useAppStore.getState()).toMatchObject({ interpreted: 1, lastDelayMs: 1_400 });
+
+    // A failed or rejected sentence is not interpreted.
+    addEntry(entry(1, { status: 'translating', latencyMs: null }));
+    patchEntry('u1', { status: 'error', error: 'Translation failed' });
+    addEntry(entry(2, { status: 'dropped', dropReason: 'no_speech', latencyMs: null }));
+    expect(useAppStore.getState().interpreted).toBe(1);
+
+    // A long call: the total keeps growing after the screen has started to drop old rows.
+    for (let i = 3; i < MAX_TRANSCRIPT_ENTRIES + 50; i++) addEntry(entry(i, { latencyMs: i }));
+    expect(onScreen()).toHaveLength(MAX_TRANSCRIPT_ENTRIES);
+    expect(useAppStore.getState()).toMatchObject({
+      interpreted: MAX_TRANSCRIPT_ENTRIES + 48,
+      lastDelayMs: MAX_TRANSCRIPT_ENTRIES + 49,
+    });
+  });
+
   it('clearTranscript() empties the screen and what was kept', () => {
     for (let i = 0; i < MAX_TRANSCRIPT_ENTRIES + 10; i++) addEntry(entry(i));
     clearTranscript();
     expect(onScreen()).toEqual([]);
     expect(transcriptForExport()).toEqual([]);
+    expect(useAppStore.getState()).toMatchObject({ interpreted: 0, lastDelayMs: null });
     addEntry(entry(1_000));
     expect(transcriptForExport().map((e) => e.id)).toEqual(['u1000']);
   });

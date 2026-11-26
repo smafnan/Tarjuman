@@ -2482,6 +2482,10 @@
   color: var(--ok);
 }
 
+.outcome--warning {
+  color: var(--warn);
+}
+
 .outcome--failed {
   color: var(--danger);
 }

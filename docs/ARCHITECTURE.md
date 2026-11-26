@@ -226,7 +226,9 @@ utterance N+1     [ STT ]─────▶[ translate ]────▶[ synthes
 - Synthesis runs in order on a second lane, so translating sentence N+1 never waits for the
   audio of sentence N. The first sentence of a translation is synthesized and sent on its
   own; the rest follows while it plays. A translation that would be spoken more than 15 s
-  late is not spoken; the caption stays and is marked as not spoken.
+  late is not spoken; the caption stays and is marked as not spoken. When a chunk of speech
+  cannot be handed to the browser (it has stopped reading and 16 MB are queued), the rest is
+  still sent, and the caption is marked as only partly spoken (`notSpoken: 'incomplete'`).
 - The voice needs a connection to the voice service. Idle connections to the providers are
   kept for a minute (Node closes them after 4 s by default, which cost a TLS handshake of
   230 to 320 ms on nearly every request), and the `speech.start` hint opens the ones that

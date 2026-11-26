@@ -247,7 +247,9 @@ class Controller implements AppController {
           // Said plainly: on my own channel I would otherwise assume the other side heard it.
           ...(message.notSpoken === 'late'
             ? { error: 'Shown but not spoken: the voice had fallen too far behind.' }
-            : {}),
+            : message.notSpoken === 'incomplete'
+              ? { error: 'Only partly spoken: some of the voice could not be delivered to this browser.' }
+              : {}),
         });
         this.settle(message.id);
         return;
@@ -453,15 +455,15 @@ class Controller implements AppController {
     this.syncPending(channel);
   }
 
-  sendText(channel: ChannelId, rawText: string): void {
+  sendText(channel: ChannelId, rawText: string): boolean {
     const text = rawText.trim();
-    if (!text) return;
+    if (!text) return false;
     if (text.length > LIMITS.maxTextChars) {
       pushNotice(
         'warning',
         `That is too long to interpret at once (limit ${LIMITS.maxTextChars} characters).`,
       );
-      return;
+      return false;
     }
     // Typing is a user action, which is what browsers require before audio may play.
     void this.unlockAudio();
@@ -470,13 +472,14 @@ class Controller implements AppController {
       // Worded to stay true after the connection is back: the user still has to send it again.
       pushNotice(
         'warning',
-        'The text was not sent because the server was not connected. Send it again once the connection is back.',
+        'The text was not sent because the server was not connected. It is still in the typing box: send it again once the connection is back.',
       );
-      return;
+      return false;
     }
     this.open.set(id, channel);
     addEntry(this.newEntry(id, channel, { typed: true, status: 'translating', sourceText: text }));
     this.syncPending(channel);
+    return true;
   }
 
   // -------------------------------------------------------------------------------------
