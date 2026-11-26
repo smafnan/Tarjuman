@@ -1,5 +1,5 @@
 import { LoaderCircle } from 'lucide-react';
-import { useId, type ReactNode } from 'react';
+import { useId, type CSSProperties, type ReactNode } from 'react';
 
 import { cx } from '../lib/cx';
 import type { SelectOption } from '../lib/devices';
@@ -57,6 +57,8 @@ interface SliderProps {
 export function Slider({ label, value, min, max, step, format, onChange, note, disabled }: SliderProps) {
   const id = useId();
   const noteId = useId();
+  // The track is drawn filled up to the value.
+  const fill = max > min ? ((Math.min(max, Math.max(min, value)) - min) / (max - min)) * 100 : 0;
   return (
     <div className={cx('slider', disabled && 'is-disabled')}>
       <div className="slider__head">
@@ -75,6 +77,7 @@ export function Slider({ label, value, min, max, step, format, onChange, note, d
         step={step}
         value={value}
         disabled={disabled}
+        style={{ '--fill': `${fill.toFixed(1)}%` } as CSSProperties}
         aria-valuetext={format(value)}
         aria-describedby={note ? noteId : undefined}
         onChange={(event) => onChange(Number(event.target.value))}

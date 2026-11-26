@@ -35,7 +35,7 @@ function Toast({ notice }: { notice: Notice }) {
 }
 
 interface ToastsProps {
-  /** `page` floats over the transcript; `dialog` sits in the flow of an open dialog. */
+  /** `page` is a strip under the conversation's title; `dialog` sits in the flow of an open dialog. */
   placement: 'page' | 'dialog';
   /** The page copy stays mounted behind an open dialog (it is inert there) but must not show twice. */
   covered?: boolean;

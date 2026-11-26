@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator } from '@playwright/test';
 
 /**
  * Behaviour of the interface that only a real browser can show: layout in the narrow
@@ -17,7 +17,7 @@ test('they-say text is interpreted into Urdu, right to left', async ({ page }) =
   await expect(entry.locator('.entry__source')).toHaveAttribute('lang', 'de');
   await expect(entry.locator('.entry__target')).toHaveAttribute('lang', 'ur');
   await expect(entry.locator('.entry__target')).toHaveAttribute('dir', 'rtl');
-  await expect(entry.locator('.badge')).toHaveText(/\d\.\d s/);
+  await expect(entry.locator('.entry__latency')).toHaveText(/\d\.\d s/);
 });
 
 for (const size of [
@@ -53,6 +53,35 @@ for (const size of [
   });
 }
 
+test('in a wide window each language keeps its own column, whoever speaks', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/');
+  await expect(page.getByText('Connected', { exact: true })).toBeVisible();
+
+  await page.getByRole('textbox', { name: /Type in Urdu/ }).fill('یہ ایک ٹیسٹ ہے');
+  await page.getByRole('button', { name: 'Translate' }).click();
+  await page.getByRole('radio', { name: 'They say' }).check();
+  await page.getByRole('textbox', { name: /Type in German/ }).fill('Guten Morgen, können Sie mich hören?');
+  await page.getByRole('button', { name: 'Translate' }).click();
+
+  const mine = page.locator('.entry').nth(0);
+  const theirs = page.locator('.entry').nth(1);
+  await expect(mine.locator('.entry__target')).toHaveAttribute('lang', 'de');
+  await expect(theirs.locator('.entry__target')).toHaveAttribute('lang', 'ur');
+
+  // German in one column and Urdu in another, in the same place for both speakers.
+  const left = async (locator: Locator) => (await locator.boundingBox())?.x ?? Number.NaN;
+  const [germanMine, germanTheirs, urduMine, urduTheirs] = await Promise.all([
+    left(mine.locator('p[lang="de"]')),
+    left(theirs.locator('p[lang="de"]')),
+    left(mine.locator('p[lang="ur"]')),
+    left(theirs.locator('p[lang="ur"]')),
+  ]);
+  expect(Math.abs(germanMine - germanTheirs)).toBeLessThan(2);
+  expect(Math.abs(urduMine - urduTheirs)).toBeLessThan(2);
+  expect(urduMine).toBeGreaterThan(germanMine + 300);
+});
+
 test('a very long word wraps instead of widening the page', async ({ page }) => {
   await page.setViewportSize({ width: 480, height: 640 });
   await page.goto('/');
@@ -70,8 +99,12 @@ test('holding Space talks in push-to-talk mode, also right after clicking a butt
   await expect(page.getByText('Connected', { exact: true })).toBeVisible();
 
   const mine = page.getByRole('region', { name: 'You speak' });
-  await mine.getByText('Advanced').click();
-  await mine.getByRole('radio', { name: 'Push-to-talk' }).check();
+  await mine.getByRole('button', { name: 'Devices and voice' }).click();
+  const sheet = page.getByRole('dialog', { name: 'Devices and voice' });
+  await sheet.getByText('Advanced').click();
+  await sheet.getByRole('radio', { name: 'Push-to-talk' }).check();
+  await page.keyboard.press('Escape');
+  await expect(sheet).toBeHidden();
   await page.getByRole('button', { name: 'Start microphone' }).click();
   const stop = page.getByRole('button', { name: 'Stop microphone' });
   await expect(stop).toBeVisible({ timeout: 20_000 });

@@ -116,7 +116,7 @@ limits and how to change them: [docs/PROVIDERS.md](docs/PROVIDERS.md).
 - **Fill in the glossary** (Settings → Languages & style) with the names of people,
   products and projects. It fixes most "wrong word" problems.
 - **Describe the meeting** in one sentence in the same place. It helps with jargon.
-- **Push-to-talk** (channel panel → Advanced) avoids interpreting side conversations. Hold
+- **Push-to-talk** (_You speak_ → Devices and voice → Advanced) avoids interpreting side conversations. Hold
   Space to talk. It works only while the Tarjuman window has focus: holding Space while
   Teams is in front sends the key to Teams.
 
@@ -138,8 +138,9 @@ limits and how to change them: [docs/PROVIDERS.md](docs/PROVIDERS.md).
 - **VB-CABLE** (the usual virtual cable on Windows) is donationware; its licence asks
   companies to pay what they consider fair. BlackHole on macOS is free.
 - **Free tiers are small.** Expect roughly one to three hours of conversation a day before
-  limits bite, depending on the providers. The status chips at the top show what is in use
-  and what is cooling down.
+  limits bite, depending on the providers. The three service dots at the top (speech
+  recognition, translation, voice) turn amber when a step is cooling down; click them to
+  see which provider is in use.
 - **Interpreting is not perfect.** Read the captions when something sounds wrong, and
   confirm numbers, dates and decisions in writing.
 
@@ -217,13 +218,13 @@ volume.
 | The other side hears nothing                                     | "Translated voice goes to" must be the virtual cable, and the Teams microphone its other end. Use "Play a test phrase" in the setup guide and watch the Teams microphone level.       |
 | The other side hears a chopped voice                             | In Teams → Settings → Devices set Noise suppression to Low or Off and turn Voice isolation off.                                                                                       |
 | Nothing happens when they speak                                  | When sharing, the "Also share tab audio" box must be ticked. Stop and capture again.                                                                                                  |
-| You hear the original and the translation on top of each other   | Lower the Teams volume, or switch on "Mute the captured tab itself" (Advanced) and set the original voice volume to taste.                                                            |
+| You hear the original and the translation on top of each other   | Lower the Teams volume, or switch on "Mute the captured tab itself" (They speak → Devices and voice → Advanced) and set the original voice volume to taste.                           |
 | Your own translation is translated back                          | Wear headphones, or switch off "I am using headphones".                                                                                                                               |
-| Translations arrive late                                         | Look at the latency badge on each entry. Shorten "Pause that ends a sentence", speak in shorter sentences, or check which provider is active in the status chips.                     |
+| Translations arrive late                                         | Look at the delay shown beside each sentence. Shorten "Pause that ends a sentence", speak in shorter sentences, or click the service dots at the top to see which provider is active. |
 | Voice is missing, captions work                                  | The voice provider failed (see the note on the entry). Add an Azure AI Speech key.                                                                                                    |
 | Behind a company proxy nothing connects                          | Put `HTTPS_PROXY` in `.env` (see "Behind a company proxy" below).                                                                                                                     |
 | "Translated speech cannot be played: the audio device stopped."  | The audio device was unplugged or switched off. Plug it in again, or choose another one, and press **Resume audio** in the banner.                                                    |
-| The device and voice controls are gone                           | In a narrow or low window (980 px wide or 720 px high, or less) they are folded behind the **Devices and voice** button of each channel. Make the window larger, or press the button. |
+| Where are the device and voice controls?                         | In a side sheet: press **Devices and voice** in _You speak_ or _They speak_ at the top of the window.                                                                                 |
 
 ### Behind a company proxy
 

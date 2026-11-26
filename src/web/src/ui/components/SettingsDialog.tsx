@@ -485,11 +485,11 @@ function AppearanceTab() {
     <div className="stack">
       <Segmented
         label="Theme"
-        value={ui.theme}
+        // Dark is the interface as designed; a `system` saved by an earlier version shows as dark.
+        value={ui.theme === 'light' ? 'light' : 'dark'}
         options={[
-          { value: 'system', label: 'System' },
-          { value: 'light', label: 'Light' },
           { value: 'dark', label: 'Dark' },
+          { value: 'light', label: 'Daylight' },
         ]}
         onChange={(theme) => update({ ui: { theme } })}
       />
@@ -593,7 +593,8 @@ export function SettingsDialog({ open, tab, onTabChange, onClose, overlay }: Set
           </button>
         ))}
       </div>
-      <div role="tabpanel" id="settings-panel" aria-labelledby={`settings-tab-${tab}`}>
+      {/* Keyed by tab, so each section eases in when it is chosen. */}
+      <div key={tab} role="tabpanel" id="settings-panel" aria-labelledby={`settings-tab-${tab}`}>
         {tab === 'keys' ? <KeysTab /> : null}
         {tab === 'languages' ? <LanguagesTab /> : null}
         {tab === 'audio' ? <AudioTab /> : null}

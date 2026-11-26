@@ -110,7 +110,7 @@ that does not contain `gemini-flash-lite` it only transcribes, and the translati
 by the translators you listed.
 
 The ids are shown in square brackets by `npm run doctor`, and in the list that opens when
-you click a status chip in the app.
+you click the service dots at the top of the app.
 
 Note that the keyless MyMemory translator is part of the default chain: when every other
 translator fails or is slow, the sentence is sent to it. Leave it out of `MT_PROVIDERS` if

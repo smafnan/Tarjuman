@@ -11,7 +11,14 @@ import { useDismissable } from '../hooks/useDismissable';
 import { useNow } from '../hooks/useNow';
 import { formatCountdown } from '../lib/format';
 import { shiftIntoViewport } from '../lib/geometry';
-import { inFallbackOrder, PROVIDER_KIND_LABEL, PROVIDER_STATE_LABEL, summarizeChain } from '../lib/providers';
+import {
+  inFallbackOrder,
+  PROVIDER_KIND_LABEL,
+  PROVIDER_STATE_LABEL,
+  summarizeChain,
+  type ChainSummary,
+} from '../lib/providers';
+import { BrandMark } from './BrandMark';
 
 const CONNECTION: Record<ConnectionState, { label: string; dot: string }> = {
   connected: { label: 'Connected', dot: 'dot--ok' },
@@ -22,17 +29,34 @@ const CONNECTION: Record<ConnectionState, { label: string; dot: string }> = {
 
 const TONE_DOT = { ok: 'dot--ok', warn: 'dot--warn', danger: 'dot--danger', unknown: '' } as const;
 
-function ProviderChip({ kind }: { kind: ProviderKind }) {
-  const chain = useAppStore((state) => state.providers[kind]);
+const KINDS: readonly ProviderKind[] = ['stt', 'mt', 'tts'];
+
+/** What the bar says about a step that cannot work right now; nothing while it can. */
+function problemText(summary: ChainSummary, now: number): string | null {
+  if (summary.tone === 'warn') {
+    return summary.cooldownUntil
+      ? `Cooling down · ${formatCountdown(summary.cooldownUntil - now)}`
+      : 'Cooling down';
+  }
+  if (summary.tone === 'danger') return 'Needs a key';
+  return null;
+}
+
+/**
+ * The three steps (recognition, translation, voice) as one quiet control: a dot each while
+ * all is well, words only for the step that has a problem. The list behind it shows every
+ * provider in the order they are tried.
+ */
+function Services() {
+  const providers = useAppStore((state) => state.providers);
   const [open, setOpen] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
+  const popover = useRef<HTMLDivElement>(null);
   const close = useCallback(() => setOpen(false), []);
   useDismissable(open, wrap, close);
 
-  const popover = useRef<HTMLDivElement>(null);
-
-  // The list is anchored to its chip, which can sit anywhere in a wrapped top bar; slide it
-  // back into the window instead of letting it run off an edge.
+  // Anchored to its button, which can sit anywhere in a wrapped top bar; slide the list back
+  // into the window instead of letting it run off an edge.
   useLayoutEffect(() => {
     const element = popover.current;
     if (!open || !element) return;
@@ -47,54 +71,72 @@ function ProviderChip({ kind }: { kind: ProviderKind }) {
     return () => window.removeEventListener('resize', fit);
   }, [open]);
 
-  const summary = summarizeChain(chain);
-  const coolingDown = summary.tone === 'warn' && summary.cooldownUntil !== null;
-  const now = useNow(coolingDown || open);
-
-  let value = '…';
-  if (summary.active) value = summary.active.label;
-  else if (summary.tone === 'warn') {
-    value = summary.cooldownUntil
-      ? `Cooling down · ${formatCountdown(summary.cooldownUntil - now)}`
-      : 'Cooling down';
-  } else if (summary.tone === 'danger') value = 'Needs a key';
+  const summaries = KINDS.map((kind) => ({ kind, summary: summarizeChain(providers[kind]) }));
+  const counting = summaries.some(({ summary }) => summary.tone === 'warn' && summary.cooldownUntil !== null);
+  const now = useNow(counting || open);
 
   return (
-    <div className="chip-wrap" ref={wrap}>
-      <button type="button" className="chip" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-        <span className={`dot ${TONE_DOT[summary.tone]}`} aria-hidden="true" />
-        <span className="chip__kind">{PROVIDER_KIND_LABEL[kind]}</span>
-        <span className="chip__value">{value}</span>
+    <div className="services" ref={wrap}>
+      <button
+        type="button"
+        className="services__button"
+        aria-expanded={open}
+        title="Which service does each step"
+        onClick={() => setOpen((value) => !value)}
+      >
+        {summaries.map(({ kind, summary }) => {
+          const problem = problemText(summary, now);
+          return (
+            <span key={kind} className={`service service--${summary.tone}`}>
+              <span className={`dot ${TONE_DOT[summary.tone]}`} aria-hidden="true" />
+              <span className="service__label">{PROVIDER_KIND_LABEL[kind]}</span>
+              {problem ? (
+                <span className="service__problem">{problem}</span>
+              ) : (
+                <span className="visually-hidden">{summary.active ? ' ready' : ' not known yet'}</span>
+              )}
+            </span>
+          );
+        })}
       </button>
       {open ? (
-        <div
-          className="popover"
-          ref={popover}
-          role="dialog"
-          aria-label={`${PROVIDER_KIND_LABEL[kind]} providers`}
-        >
-          <p className="popover__title">Tried in this order</p>
-          <ol className="chain">
-            {inFallbackOrder(chain).map((provider) => (
-              <li key={provider.id} className="chain__item">
-                <span
-                  className={`dot ${provider.state === 'ready' ? 'dot--ok' : provider.state === 'cooldown' ? 'dot--warn' : ''}`}
-                  aria-hidden="true"
-                />
-                <span title={`Provider id: ${provider.id}`}>
-                  {provider.label} <code className="chain__id">{provider.id}</code>
-                </span>
-                <span className="muted small">
-                  {provider.state === 'cooldown' && provider.cooldownUntil
-                    ? `${PROVIDER_STATE_LABEL.cooldown} · ${formatCountdown(provider.cooldownUntil - now)}`
-                    : PROVIDER_STATE_LABEL[provider.state]}
-                </span>
-                {provider.detail && provider.state !== 'unconfigured' ? (
-                  <span className="chain__detail">{provider.detail}</span>
-                ) : null}
-              </li>
-            ))}
-          </ol>
+        <div className="popover" ref={popover} role="dialog" aria-label="Services">
+          {summaries.map(({ kind }) => (
+            <section key={kind} className="popover__section" aria-label={PROVIDER_KIND_LABEL[kind]}>
+              <h3 className="popover__title">
+                {PROVIDER_KIND_LABEL[kind]}
+                <span className="popover__note">tried in this order</span>
+              </h3>
+              {providers[kind].length === 0 ? (
+                <p className="muted small">Not known until the server answers.</p>
+              ) : (
+                <ol className="chain">
+                  {inFallbackOrder(providers[kind]).map((provider) => (
+                    <li key={provider.id} className="chain__item">
+                      <span
+                        className={`dot ${provider.state === 'ready' ? 'dot--ok' : provider.state === 'cooldown' ? 'dot--warn' : ''}`}
+                        aria-hidden="true"
+                      />
+                      <span className="chain__name">
+                        {provider.label}
+                        <code className="chain__id" title="Provider id, as used in the .env file">
+                          {provider.id}
+                        </code>
+                      </span>
+                      <span className="chain__state">
+                        {provider.state === 'cooldown' && provider.cooldownUntil
+                          ? `${PROVIDER_STATE_LABEL.cooldown} · ${formatCountdown(provider.cooldownUntil - now)}`
+                          : PROVIDER_STATE_LABEL[provider.state]}
+                      </span>
+                      {provider.detail && provider.state !== 'unconfigured' ? (
+                        <span className="chain__detail">{provider.detail}</span>
+                      ) : null}
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </section>
+          ))}
         </div>
       ) : null}
     </div>
@@ -117,17 +159,10 @@ export function Header({ onOpenGuide, onOpenSettings }: HeaderProps) {
 
   return (
     <header className="topbar">
-      <div className="brand">
+      <h1 className="brand">
+        <BrandMark className="brand__mark" />
         <span className="brand__name">Tarjuman</span>
-        <span className="brand__ur script-arab" lang="ur" dir="rtl">
-          ترجمان
-        </span>
-      </div>
-
-      <span className="connection" role="status">
-        <span className={`dot ${CONNECTION[connection].dot}`} aria-hidden="true" />
-        {CONNECTION[connection].label}
-      </span>
+      </h1>
 
       <div className="pair">
         <span>
@@ -140,24 +175,27 @@ export function Header({ onOpenGuide, onOpenSettings }: HeaderProps) {
           aria-label="Swap who speaks which language"
           onClick={() => controller().swapLanguages()}
         >
-          <ArrowLeftRight size={16} aria-hidden="true" />
+          <ArrowLeftRight size={15} aria-hidden="true" />
         </button>
       </div>
 
-      <div className="chips">
-        <ProviderChip kind="stt" />
-        <ProviderChip kind="mt" />
-        <ProviderChip kind="tts" />
-      </div>
+      <span className="topbar__spacer" />
+
+      <span className="connection" role="status">
+        <span className={`dot ${CONNECTION[connection].dot}`} aria-hidden="true" />
+        <span className="connection__label">{CONNECTION[connection].label}</span>
+      </span>
+
+      <Services />
 
       <div className="topbar__actions">
-        <button type="button" className="button" onClick={onOpenGuide}>
+        <button type="button" className="button" title="Setup guide" onClick={onOpenGuide}>
           <BookOpen size={16} aria-hidden="true" />
-          Setup guide
+          <span className="button__label">Setup guide</span>
         </button>
-        <button type="button" className="button" onClick={onOpenSettings}>
+        <button type="button" className="button" title="Settings" onClick={onOpenSettings}>
           <Settings size={16} aria-hidden="true" />
-          Settings
+          <span className="button__label">Settings</span>
         </button>
       </div>
     </header>

@@ -46,7 +46,7 @@ export const DEFAULT_LOCAL_SETTINGS: LocalSettings = {
   vadSensitivity: 'normal',
   pauseMs: 650,
   browserTtsFallback: true,
-  ui: { theme: 'system', urduFont: 'nastaliq', captionScale: 1 },
+  ui: { theme: 'dark', urduFont: 'nastaliq', captionScale: 1 },
 };
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

@@ -128,9 +128,45 @@ measured against the audio frames themselves.
 
 One store (zustand). The controller is its only writer; React components read it with
 narrow selectors and call controller methods. `state/types.ts` is the contract between
-the two halves. In a narrow window (980 px wide or less, or 720 px high or less) the two
-channel panels sit in a strip above the conversation and their device, voice and Advanced
-controls are folded behind a **Devices and voice** button.
+the two halves.
+
+The interface is dark by design (a Daylight variant is in the settings) and laid out the
+same at every window size: a console with your side on the left and theirs, mirrored, on the
+right (which way it interprets, lamp, start/stop key, the pipeline of the current sentence,
+level meter), the conversation below it, and the typing box at the bottom. Ember is your
+voice and frost is theirs. What is set once per call (devices, voice, Advanced) lives in a
+side sheet behind each side's **Devices and voice** button. The conversation measures its
+own width (a `ResizeObserver`, never a timer) and, when every language gets at least 300 px,
+sets the languages side by side in fixed columns (theirs, captions, mine) with hairline
+rules between them; otherwise it stacks them per sentence. While it is empty it shows
+`Interlude`, a title page set on those same columns: it drafts the rules, writes the name
+and lists the three steps to begin. Styles are plain CSS with design tokens in
+`ui/styles/base.css`; `contrast.test.ts` checks the token colours against WCAG AA.
+
+Followed during a call, the conversation rests on whole sentences. `ui/lib/reading.ts` is
+the geometry (pure, with tests): the top edge falls between two sentences, room is left
+under the newest one so that the page turns by whole sentences and one that fits in that
+room simply appears, and a line still waiting for its words never takes the page from the
+sentence being read. `Transcript` measures, leaves the room and glides there.
+
+Motion only shows what the store already says and never sits on the capture path:
+
+- `VoiceField` is the surface across the console: the damped wave equation on a small grid,
+  drawn on a canvas as ridgelines. Each live level drives its own side, so the two voices
+  meet in the middle, and the pointer disturbs it. At rest it runs at a third of the frame
+  rate.
+- `hooks/useEntrance.ts` plays the page's arrival once (GSAP) and then hands every property
+  back to the stylesheet; the first sentences arrive on CSS delays.
+- `ui/lib/motion.ts` registers GSAP and its SplitText plugin once; `RevealLines` uses it to
+  let a new translation rise line by line, writing the text itself so React never reconciles
+  the split. Translations that arrive together (a restore, the demo) appear without it.
+- `hooks/useSmoothScroll.ts` gives the conversation Lenis wheel smoothing on GSAP's ticker.
+- With reduced motion all of it is off and everything is drawn in its final state.
+
+Type: Roboto Flex, set wide and light, for the interface's own words; Atkinson Hyperlegible
+Next for captions and running text; Martian Mono for measurements only (times, delays,
+counts); Noto Nastaliq Urdu (or Naskh) for Urdu. All are bundled; the build never inlines a
+font, because the Content-Security-Policy only allows fonts from the server itself.
 
 ## Server
 

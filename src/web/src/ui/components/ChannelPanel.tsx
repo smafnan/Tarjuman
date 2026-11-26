@@ -1,5 +1,5 @@
-import { ChevronDown, Mic, MonitorSpeaker, Square, Volume2 } from 'lucide-react';
-import { useId, useMemo, useState } from 'react';
+import { Mic, MonitorSpeaker, SlidersHorizontal, Square, TriangleAlert, Volume2 } from 'lucide-react';
+import { useMemo, type ReactNode } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 
 import { LANGUAGES } from '../../../../shared/languages';
@@ -12,6 +12,7 @@ import { deviceOptions } from '../lib/devices';
 import { formatPercent, formatRate, formatSeconds } from '../lib/format';
 import { createHoldKey } from '../lib/pushToTalk';
 import { SelectField, Segmented, Slider, Spinner, Switch } from './controls';
+import { Dialog } from './Dialog';
 
 /**
  * More queued speech than one ordinary sentence means the interpreter has fallen behind;
@@ -28,6 +29,21 @@ function LevelMeter({ channel }: { channel: ChannelId }) {
       <div className="meter__fill" style={{ transform: `scaleX(${level.toFixed(3)})` }} />
     </div>
   );
+}
+
+type LampState = 'off' | 'starting' | 'live' | 'speaking' | 'gated' | 'error';
+
+/** The channel's lamp. Decorative: the key and the status line say the same in words. */
+function Lamp({ channel }: { channel: ChannelId }) {
+  const state = useAppStore((app): LampState => {
+    const runtime = app.channels[channel];
+    if (runtime.captureError) return 'error';
+    if (runtime.capture === 'starting') return 'starting';
+    if (runtime.capture !== 'capturing') return 'off';
+    if (runtime.gated) return 'gated';
+    return runtime.speaking ? 'speaking' : 'live';
+  });
+  return <span className={`lamp lamp--${state}`} aria-hidden="true" />;
 }
 
 function CaptureStatus({ channel }: { channel: ChannelId }) {
@@ -61,7 +77,11 @@ function CaptureStatus({ channel }: { channel: ChannelId }) {
   }
   if (runtime.gated) return <p className="status">Paused while the translation plays</p>;
   if (runtime.speaking) return <p className="status status--live">Speaking…</p>;
-  return <p className="status">{runtime.sourceLabel ?? 'Listening'}</p>;
+  return (
+    <p className="status" title={runtime.sourceLabel ?? undefined}>
+      {runtime.sourceLabel ?? 'Listening'}
+    </p>
+  );
 }
 
 function Activity({ channel }: { channel: ChannelId }) {
@@ -123,6 +143,51 @@ function HoldToTalk() {
     >
       {held ? 'Listening — release to translate' : 'Hold to talk (or hold Space)'}
     </button>
+  );
+}
+
+/**
+ * What would keep the translated voice from arriving where it should, said where it is seen
+ * during a call, with the fix one click away. The device lists themselves live in the sheet.
+ */
+function RoutingNote({ channel, onOpenGuide }: { channel: ChannelId; onOpenGuide: () => void }) {
+  const sinkOk = useAppStore((state) => state.channels[channel].sinkOk);
+  const devices = useAppStore((state) => state.devices);
+  const sinkId = useAppStore((state) => state.settings.outgoing.sinkId);
+
+  if (!sinkOk) {
+    return (
+      <p className="module__note module__note--danger">
+        <TriangleAlert size={14} aria-hidden="true" />
+        <span>The chosen output could not be used; the translation plays on the default device.</span>
+      </p>
+    );
+  }
+  if (channel !== 'outgoing' || !devices.labelsAvailable || !devices.canChooseOutput) return null;
+  if (devices.outputs.some((device) => device.virtual && device.deviceId === sinkId)) return null;
+
+  const cable = devices.outputs.find((device) => device.virtual);
+  return (
+    <p className="module__note">
+      <TriangleAlert size={14} aria-hidden="true" />
+      <span>
+        Teams only hears the translation through a virtual cable.{' '}
+        {cable ? (
+          <button
+            type="button"
+            className="link-button"
+            title={cable.label}
+            onClick={() => controller().updateSettings({ outgoing: { sinkId: cable.deviceId } })}
+          >
+            Use the virtual cable
+          </button>
+        ) : (
+          <button type="button" className="link-button" onClick={onOpenGuide}>
+            How to set one up
+          </button>
+        )}
+      </span>
+    </p>
   );
 }
 
@@ -349,85 +414,207 @@ function IncomingControls() {
   );
 }
 
-export function ChannelPanel({ channel }: { channel: ChannelId }) {
-  const copy = CHANNEL_COPY[channel];
+function useFlow(channel: ChannelId): string {
   const flow = useAppStore(
     useShallow((state) => {
       const c = state.settings.session.channels[channel];
       return { source: c.sourceLang, target: c.targetLang };
     }),
   );
+  return `${LANGUAGES[flow.source].name} → ${LANGUAGES[flow.target].name}`;
+}
+
+interface ChannelPanelProps {
+  channel: ChannelId;
+  onOpenDevices: () => void;
+  onOpenGuide: () => void;
+}
+
+/**
+ * What the keys say where a side is only a narrow column (a phone). Each is the beginning of
+ * the key's full name, so what is read on the key is still what the button is called, and
+ * the two sides never show the same word.
+ */
+const SHORT_KEY: Record<ChannelId, { start: string; stop: string }> = {
+  outgoing: { start: 'Start mic', stop: 'Stop mic' },
+  incoming: { start: 'Capture', stop: 'Stop' },
+};
+
+type Stage = 'off' | 'idle' | 'hear' | 'write' | 'translate' | 'speak';
+
+const STAGES = [
+  { id: 'hear', label: 'Hear' },
+  { id: 'write', label: 'Write' },
+  { id: 'translate', label: 'Translate' },
+  { id: 'speak', label: 'Speak' },
+] as const;
+
+/**
+ * Where the channel's current sentence is on its way: heard, written down, translated,
+ * spoken. A light travels along the line into the step that is at work. It draws what the
+ * status line and the activity say in words, so it is hidden from screen readers.
+ */
+function Pipeline({ channel }: { channel: ChannelId }) {
+  const stage = useAppStore((state): Stage => {
+    const runtime = state.channels[channel];
+    if (runtime.capture !== 'capturing') return 'off';
+    if (runtime.playing) return 'speak';
+    // The channel's newest sentence, if it is still on its way.
+    for (let i = state.transcript.length - 1; i >= 0 && i >= state.transcript.length - 8; i--) {
+      const entry = state.transcript[i];
+      if (!entry || entry.channel !== channel) continue;
+      if (entry.status === 'speaking') return 'speak';
+      if (entry.status === 'translating') return 'translate';
+      if (entry.status === 'transcribing') return 'write';
+      break;
+    }
+    if (runtime.pending > 0) return 'translate';
+    return runtime.speaking ? 'hear' : 'idle';
+  });
+  const at = STAGES.findIndex((item) => item.id === stage);
+
+  return (
+    <ol className={cx('pipeline', stage === 'off' && 'is-off')} aria-hidden="true">
+      {STAGES.map((item, index) => (
+        <li
+          key={item.id}
+          className={cx(
+            'pipeline__stage',
+            index === at && 'is-active',
+            index < at && 'is-passed',
+            stage === 'idle' && index === 0 && 'is-waiting',
+          )}
+        >
+          {item.label}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/**
+ * One side of the console: which way it interprets, whether it is live, the key that starts
+ * and stops it, and where its current sentence is. Everything that is set once (devices,
+ * voice) is in the sheet behind "Devices and voice".
+ *
+ * Your side sits on the left and theirs, mirrored, on the right, each beside the end of the
+ * surface (VoiceField) its voice enters from.
+ */
+export function ChannelPanel({ channel, onOpenDevices, onOpenGuide }: ChannelPanelProps) {
+  const copy = CHANNEL_COPY[channel];
+  const flow = useFlow(channel);
   const capture = useAppStore((state) => state.channels[channel].capture);
+  const speaking = useAppStore((state) => state.channels[channel].speaking);
   const pushToTalk = useAppStore(
     (state) => channel === 'outgoing' && state.settings.outgoing.micMode === 'push-to-talk',
   );
-  const labelsAvailable = useAppStore((state) => state.devices.labelsAvailable);
-  const [expanded, setExpanded] = useState(false);
-  const bodyId = useId();
   const live = capture === 'capturing';
   const Icon = channel === 'outgoing' ? Mic : MonitorSpeaker;
 
   return (
-    <section className={cx('panel', `panel--${channel}`, expanded && 'is-expanded')} aria-label={copy.title}>
-      <div className="panel__head">
-        <div>
-          <h2 className="panel__title">{copy.title}</h2>
-          <p className="panel__flow">
-            {LANGUAGES[flow.source].name} → {LANGUAGES[flow.target].name}
-          </p>
+    <section
+      className={cx('module', `module--${channel}`, live && 'is-live', live && speaking && 'is-speaking')}
+      aria-label={copy.title}
+    >
+      <div className="module__head">
+        <h2 className="module__title">{flow}</h2>
+        <div className="module__meta">
+          <Lamp channel={channel} />
+          <span className="module__who label">{copy.title}</span>
+          <CaptureStatus channel={channel} />
         </div>
-        <span className={`tag tag--${channel}`}>{copy.tag}</span>
       </div>
 
-      <div className="capture">
-        <button
-          type="button"
-          className={cx('button capture__button', live ? 'is-live' : 'button--primary')}
-          disabled={capture === 'starting'}
-          // Called directly in the click handler: browsers only open the microphone, the
-          // sharing dialog and audio playback in response to a user action.
-          onClick={() => (live ? controller().stopChannel(channel) : void controller().startChannel(channel))}
-        >
-          {capture === 'starting' ? (
-            <Spinner />
-          ) : live ? (
-            <Square size={15} aria-hidden="true" />
-          ) : (
-            <Icon size={16} aria-hidden="true" />
-          )}
-          {live ? copy.stop : copy.start}
-        </button>
-        <CaptureStatus channel={channel} />
-        <LevelMeter channel={channel} />
-      </div>
-
-      {pushToTalk && live ? <HoldToTalk /> : null}
-      <Activity channel={channel} />
-
-      {/* Only shown in the compact layouts, where the devices and voice options are folded away. */}
-      <button
-        type="button"
-        className="button button--quiet button--small panel__toggle"
-        aria-expanded={expanded}
-        aria-controls={bodyId}
-        onClick={() => setExpanded((value) => !value)}
-      >
-        <ChevronDown size={14} aria-hidden="true" /> Devices and voice
-      </button>
-
-      <div className="panel__body" id={bodyId}>
-        {channel === 'outgoing' ? <OutgoingControls /> : <IncomingControls />}
-
-        {!labelsAvailable ? (
+      <div className="module__deck">
+        <div className="module__keys">
           <button
             type="button"
-            className="button button--small"
-            onClick={() => void controller().unlockDeviceLabels()}
+            className={cx('key', live && 'is-live')}
+            // The button's name is always the whole label; a phone shows its first word only.
+            aria-label={live ? copy.stop : copy.start}
+            disabled={capture === 'starting'}
+            // Called directly in the click handler: browsers only open the microphone, the
+            // sharing dialog and audio playback in response to a user action.
+            onClick={() =>
+              live ? controller().stopChannel(channel) : void controller().startChannel(channel)
+            }
           >
-            Show device names
+            {capture === 'starting' ? (
+              <Spinner />
+            ) : live ? (
+              <Square size={12} aria-hidden="true" />
+            ) : (
+              <Icon size={16} aria-hidden="true" />
+            )}
+            <span className="key__full">{live ? copy.stop : copy.start}</span>
+            <span className="key__short">{live ? SHORT_KEY[channel].stop : SHORT_KEY[channel].start}</span>
           </button>
-        ) : null}
+          <button
+            type="button"
+            className="icon-button module__devices"
+            title="Devices and voice"
+            onClick={onOpenDevices}
+          >
+            <SlidersHorizontal size={15} aria-hidden="true" />
+            <span className="module__devices-label">Devices and voice</span>
+          </button>
+        </div>
+        <div className="module__signal">
+          <Pipeline channel={channel} />
+          <LevelMeter channel={channel} />
+          <Activity channel={channel} />
+        </div>
+      </div>
+
+      <div className="module__extras">
+        {pushToTalk && live ? <HoldToTalk /> : null}
+        <RoutingNote channel={channel} onOpenGuide={onOpenGuide} />
       </div>
     </section>
+  );
+}
+
+interface DevicesSheetProps {
+  channel: ChannelId;
+  open: boolean;
+  onClose: () => void;
+  overlay?: ReactNode;
+}
+
+/** A channel's devices and voice, in a sheet along the right edge, with the live level on top. */
+export function DevicesSheet({ channel, open, onClose, overlay }: DevicesSheetProps) {
+  const copy = CHANNEL_COPY[channel];
+  const flow = useFlow(channel);
+  const labelsAvailable = useAppStore((state) => state.devices.labelsAvailable);
+
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      variant="sheet"
+      title="Devices and voice"
+      subtitle={`${copy.title} · ${flow}`}
+      icon={<SlidersHorizontal size={18} aria-hidden="true" />}
+      overlay={overlay}
+    >
+      <div className="stack">
+        <div className={cx('sheet-monitor', `sheet-monitor--${channel}`)}>
+          <LevelMeter channel={channel} />
+          <CaptureStatus channel={channel} />
+        </div>
+        {channel === 'outgoing' ? <OutgoingControls /> : <IncomingControls />}
+        {!labelsAvailable ? (
+          <div>
+            <button
+              type="button"
+              className="button button--small"
+              onClick={() => void controller().unlockDeviceLabels()}
+            >
+              Show device names
+            </button>
+          </div>
+        ) : null}
+      </div>
+    </Dialog>
   );
 }

@@ -206,6 +206,44 @@ const TRANSCRIPT: TranscriptEntry[] = [
   entry(9, { status: 'transcribing', latencyMs: null, timings: null, providers: {} }),
 ];
 
+const sampleTimers: number[] = [];
+
+function stopSample() {
+  for (const timer of sampleTimers) window.clearTimeout(timer);
+  sampleTimers.length = 0;
+}
+
+export function replaySample() {
+  stopSample();
+  const sample = TRANSCRIPT.filter((item) => item.status === 'done' && !item.error);
+  const start = Date.now();
+  useAppStore.setState({ transcript: [], notices: [] });
+  sample.forEach((item, index) => {
+    const createdAt = start + index * 3100;
+    const id = `sample-${createdAt}-${index}`;
+    sampleTimers.push(
+      window.setTimeout(() => {
+        useAppStore.setState((state) => ({
+          transcript: [
+            ...state.transcript,
+            { ...item, id, createdAt, status: 'translating', translations: {}, latencyMs: null },
+          ],
+        }));
+      }, index * 3100),
+    );
+    sampleTimers.push(
+      window.setTimeout(
+        () => {
+          useAppStore.setState((state) => ({
+            transcript: state.transcript.map((row) => (row.id === id ? { ...item, id, createdAt } : row)),
+          }));
+        },
+        index * 3100 + 800,
+      ),
+    );
+  });
+}
+
 const KEYS: KeysResponse = {
   writable: true,
   problems: [],
@@ -321,7 +359,10 @@ function standIn(): AppController {
         },
       })),
     playTestPhrase: later,
-    clearTranscript: () => clearTranscript(),
+    clearTranscript: () => {
+      stopSample();
+      clearTranscript();
+    },
     exportTranscript: nothing,
     resetContext: nothing,
     getKeys: async () => KEYS,
@@ -331,7 +372,7 @@ function standIn(): AppController {
   };
 }
 
-/** Extra demo states for looking at them: `?demo=1&state=blocked` or `state=toasts`. */
+/** Extra demo states for looking at them: `?demo=1&state=blocked`, `state=toasts` or `state=idle`. */
 function demoScenario(): string | null {
   return new URLSearchParams(globalThis.location?.search ?? '').get('state');
 }
@@ -339,6 +380,8 @@ function demoScenario(): string | null {
 export function loadDemo(): void {
   installStandInController(standIn());
   const scenario = demoScenario();
+  // Before the call: nothing captured yet, nothing said.
+  const idle = scenario === 'idle';
   useAppStore.setState((state) => ({
     settings: sanitizeLocalSettings(
       mergeDeep(state.settings, { outgoing: { sinkId: 'cable-in' }, incoming: { sinkId: 'headset-out' } }),
@@ -346,28 +389,30 @@ export function loadDemo(): void {
     connection: 'connected',
     server: SERVER,
     providers: SERVER.providers,
-    channels: {
-      outgoing: {
-        ...initialChannelRuntime(),
-        capture: 'capturing',
-        sourceLabel: 'Headset Microphone (Jabra Evolve2 65)',
-        speaking: true,
-        level: 0.62,
-        pending: 1,
-        sinkLabel: 'CABLE Input (VB-Audio Virtual Cable)',
-        outputBlocked: scenario === 'blocked',
-      },
-      incoming: {
-        ...initialChannelRuntime(),
-        capture: 'capturing',
-        sourceLabel: 'Browser tab audio',
-        level: 0.18,
-        playing: true,
-        queueMs: 3400,
-        sinkLabel: 'Headphones (Jabra Evolve2 65)',
-      },
-    },
-    transcript: TRANSCRIPT,
+    channels: idle
+      ? { outgoing: initialChannelRuntime(), incoming: initialChannelRuntime() }
+      : {
+          outgoing: {
+            ...initialChannelRuntime(),
+            capture: 'capturing',
+            sourceLabel: 'Headset Microphone (Jabra Evolve2 65)',
+            speaking: true,
+            level: 0.62,
+            pending: 1,
+            sinkLabel: 'CABLE Input (VB-Audio Virtual Cable)',
+            outputBlocked: scenario === 'blocked',
+          },
+          incoming: {
+            ...initialChannelRuntime(),
+            capture: 'capturing',
+            sourceLabel: 'Browser tab audio',
+            level: 0.18,
+            playing: true,
+            queueMs: 3400,
+            sinkLabel: 'Headphones (Jabra Evolve2 65)',
+          },
+        },
+    transcript: idle ? [] : TRANSCRIPT,
     devices: {
       inputs: [
         { deviceId: 'headset-in', label: 'Headset Microphone (Jabra Evolve2 65)', virtual: false },
@@ -382,29 +427,33 @@ export function loadDemo(): void {
       canChooseOutput: true,
       canCaptureDisplayAudio: true,
     },
-    notices: [
-      {
-        id: 'demo-notice',
-        level: 'info',
-        message: 'Playing a test phrase on: CABLE Input (VB-Audio Virtual Cable)',
-        at: Date.now(),
-      },
-      ...(scenario === 'toasts'
-        ? [
+    notices:
+      idle || scenario === 'studio'
+        ? []
+        : [
             {
-              id: 'demo-warning',
-              level: 'warning' as const,
-              message: 'Speech recognition is cooling down.',
+              id: 'demo-notice',
+              level: 'info' as const,
+              message: 'Playing a test phrase on: CABLE Input (VB-Audio Virtual Cable)',
               at: Date.now(),
             },
-            {
-              id: 'demo-error',
-              level: 'error' as const,
-              message: 'Could not reach the translation service.',
-              at: Date.now(),
-            },
-          ]
-        : []),
-    ],
+            ...(scenario === 'toasts'
+              ? [
+                  {
+                    id: 'demo-warning',
+                    level: 'warning' as const,
+                    message: 'Speech recognition is cooling down.',
+                    at: Date.now(),
+                  },
+                  {
+                    id: 'demo-error',
+                    level: 'error' as const,
+                    message: 'Could not reach the translation service.',
+                    at: Date.now(),
+                  },
+                ]
+              : []),
+          ],
   }));
+  if (scenario === 'studio') replaySample();
 }

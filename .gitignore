@@ -11,3 +11,5 @@ test-results/
 playwright-report/
 .vite/
 *.tsbuildinfo
+# The design-review hook's working state: session ids and local paths, never shared.
+.impeccable/hook.cache.json

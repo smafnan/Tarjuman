@@ -1,65 +1,88 @@
 /*
  * Design tokens, element defaults and the small form controls.
  *
- * Colours are defined once with light-dark(): `color-scheme` on <html> (set from the
- * data-theme attribute) decides which side applies, so there is no second dark palette
- * to keep in sync.
+ * The interface is an instrument in a dark room: a carbon ground, bone-white linework and
+ * type, and two voices drawn as light. Ember is your own voice (warm, like a lit filament),
+ * frost is the other side (cold daylight); both are lines and letters, never glows. Every
+ * other colour reports a state.
+ *
+ * Colours are defined once with light-dark(): the page is dark unless the Daylight theme is
+ * chosen (`data-theme` on <html>), so there is no second palette to keep in sync.
  */
 
 :root {
-  color-scheme: light dark;
+  color-scheme: dark;
 
-  --bg: light-dark(#f4f5f7, #101216);
-  --surface: light-dark(#ffffff, #181b21);
-  --surface-2: light-dark(#f0f2f5, #20242c);
-  --surface-3: light-dark(#e6e9ee, #2a2f39);
-  --border: light-dark(#d9dde4, #313743);
-  --border-strong: light-dark(#b9c0cc, #465064);
+  --bg: light-dark(#f0efeb, #08090a);
+  --surface: light-dark(#f7f6f3, #0b0c0e);
+  --surface-2: light-dark(#e8e7e2, #131517);
+  --surface-3: light-dark(#dbdad4, #1c1e21);
+  --border: light-dark(#d7d6cf, #212327);
+  --border-strong: light-dark(#bbbab2, #33363b);
   /* Edges of inputs, selects, buttons and the off switch: 3:1 against the surfaces (WCAG 1.4.11). */
-  --control-border: light-dark(#838c9c, #6f7a8c);
-  --text: light-dark(#161a22, #eceff4);
-  --text-muted: light-dark(#5b6472, #a2abba);
-  --text-faint: light-dark(#656d7c, #8e98a8);
+  --control-border: light-dark(#7c7b74, #6f7379);
+  --text: light-dark(#111213, #e9e6df);
+  --text-muted: light-dark(#4c4c48, #a5a39c);
+  --text-faint: light-dark(#61615b, #86857f);
+  /* The rules of the grid: drawn, never boxed. */
+  --hair: light-dark(rgb(0 0 0 / 0.08), rgb(255 255 255 / 0.09));
+  --hair-strong: light-dark(rgb(0 0 0 / 0.17), rgb(255 255 255 / 0.18));
 
-  --accent: light-dark(#2f55d4, #7c9cff);
-  --accent-strong: light-dark(#2343b0, #9db4ff);
-  --accent-contrast: light-dark(#ffffff, #0d1220);
-  --accent-soft: light-dark(#e8edfc, #1f2a4a);
+  /* The two voices. Always paired with a text label, never colour alone. `-field` fills a
+     key or a chosen option; `--on-channel` is the text on that fill. */
+  --you: light-dark(#b93a0f, #ff6a3d);
+  --you-field: light-dark(#c43b12, #ff6a3d);
+  --them: light-dark(#1f4cae, #9fc4ff);
+  --them-field: light-dark(#2942b5, #9fc4ff);
+  --on-channel: light-dark(#ffffff, #0a0a0b);
 
-  /* The two channels. Always paired with a text label, never colour alone. */
-  --out: light-dark(#2f55d4, #7c9cff);
-  --out-soft: light-dark(#eef2fd, #1b2440);
-  --in: light-dark(#0b7a6e, #4fd1c0);
-  --in-soft: light-dark(#e6f5f2, #142e2b);
+  /* Links, focus and switches: the bone of the linework, so colour stays with the voices
+     and the states. */
+  --accent: light-dark(#111213, #e9e6df);
+  --accent-contrast: light-dark(#ffffff, #0a0a0b);
+  --accent-soft: light-dark(#e8e7e2, #1c1e21);
 
-  --ok: light-dark(#187a3f, #56d68a);
-  --ok-soft: light-dark(#e4f5ea, #16301f);
-  --warn: light-dark(#9a6200, #f0b54a);
-  --warn-soft: light-dark(#fdf1d8, #35290f);
-  --danger: light-dark(#c0282d, #ff8086);
-  --danger-soft: light-dark(#fde8e8, #3a1719);
+  --ok: light-dark(#1a7339, #62d691);
+  --ok-soft: light-dark(#e1f1e6, #10291b);
+  --warn: light-dark(#835800, #f2b84b);
+  --warn-soft: light-dark(#f8edd2, #2c230d);
+  --danger: light-dark(#b81c3c, #ff7d93);
+  --danger-soft: light-dark(#fbe6ea, #33131c);
 
-  --radius-s: 6px;
-  --radius: 10px;
-  --radius-l: 14px;
-  --shadow: 0 1px 2px rgb(0 0 0 / 0.06), 0 4px 16px rgb(0 0 0 / 0.06);
-  --shadow-pop: 0 8px 32px rgb(0 0 0 / 0.22);
+  --radius-s: 2px;
+  --radius: 2px;
+  --radius-l: 3px;
+  --shadow-pop: 0 0 0 1px var(--hair-strong), 0 2px 6px rgb(0 0 0 / 0.3), 0 28px 60px -20px rgb(0 0 0 / 0.7);
+  /* Exponential: quick to answer, long to settle. Nothing overshoots. */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.76, 0, 0.24, 1);
+  /* How long things take to arrive: this interface appears, it does not pop. */
+  --slow: 1.1s;
 
-  --font-ui: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  /* Roboto Flex set wide and light for the instrument's own words: its width axis gives the
+     extended, airy lettering of control rooms, and lets a title tighten or open as it moves.
+     Atkinson Hyperlegible for everything read at a glance (captions above all): letters that
+     are easy to confuse (I l 1, O 0, rn m) are made distinct. Martian Mono only for
+     measurements and code: clock times, delays, counts, and identifiers typed elsewhere. */
+  --font-display:
+    'Roboto Flex Variable', 'Atkinson Hyperlegible Next Variable', system-ui, -apple-system, 'Segoe UI',
+    sans-serif;
+  --font-ui:
+    'Atkinson Hyperlegible Next Variable', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue',
+    Arial, sans-serif;
+  --font-mono: 'Martian Mono Variable', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   --font-urdu-nastaliq: 'Noto Nastaliq Urdu Variable', 'Noto Nastaliq Urdu', 'Jameel Noori Nastaleeq', serif;
   --font-urdu-naskh: 'Noto Naskh Arabic Variable', 'Noto Naskh Arabic', 'Segoe UI', Tahoma, sans-serif;
 
   /* Set from the Appearance settings. */
   --caption-scale: 1;
+
+  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-width: thin;
 }
 
 :root[data-theme='light'] {
   color-scheme: light;
-}
-
-:root[data-theme='dark'] {
-  color-scheme: dark;
 }
 
 *,
@@ -78,8 +101,11 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 14px / 1.45 var(--font-ui);
+  font: 14px / 1.5 var(--font-ui);
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-synthesis: none;
+  caret-color: var(--text);
 }
 
 h1,
@@ -92,6 +118,12 @@ p {
 
 a {
   color: var(--accent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+a:hover {
+  text-decoration-thickness: 2px;
 }
 
 button,
@@ -102,9 +134,21 @@ textarea {
   color: inherit;
 }
 
+::selection {
+  background: color-mix(in oklab, var(--text) 24%, transparent);
+}
+
 :focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline: 1px solid var(--focus, var(--accent));
+  outline-offset: 3px;
+}
+
+code,
+kbd,
+samp,
+time {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums slashed-zero;
 }
 
 .visually-hidden {
@@ -115,6 +159,14 @@ textarea {
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
+}
+
+/* The instrument's lettering for names of things: wide, small, spaced capitals. */
+.label {
+  font: 560 10.5px / 1.3 var(--font-display);
+  font-stretch: 135%;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
 }
 
 /* Urdu (and any other Arabic-script language): typeface chosen in the settings. */
@@ -128,13 +180,39 @@ textarea {
   line-height: 1.75;
 }
 
+/* A Latin word inside Urdu (a product name, a borrowed term) takes the caption face, a size
+   down so it sits with the Nastaliq around it, and keeps its own left-to-right order. */
+.script-arab .latin {
+  font-family: var(--font-ui);
+  font-size: 0.8em;
+  unicode-bidi: isolate;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums slashed-zero;
+}
+
 .spin {
   animation: spin 0.9s linear infinite;
 }
 
 @keyframes spin {
   to {
-    transform: rotate(360deg);
+    rotate: 360deg;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    translate: 0 10px;
   }
 }
 
@@ -143,81 +221,133 @@ textarea {
   *::before,
   *::after {
     animation-duration: 0.001ms !important;
+    animation-delay: 0s !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
+    transition-delay: 0s !important;
   }
 }
 
 /* ------------------------------------------------------------------ buttons */
 
+/*
+ * A button is an outline that fills under the pointer: the fill sweeps in from the left and
+ * the label takes the ground's colour as it passes. `--sweep` is the fill, `--sweep-ink` the
+ * label on it.
+ */
 .button {
+  --sweep: var(--text);
+  --sweep-ink: var(--bg);
+
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 8px;
   min-height: 34px;
-  padding: 6px 12px;
+  padding: 6px 14px;
   border: 1px solid var(--control-border);
-  border-radius: var(--radius-s);
-  background: var(--surface);
+  border-radius: var(--radius);
+  background: linear-gradient(var(--sweep), var(--sweep)) no-repeat left / 0% 100%;
   cursor: pointer;
-  font-weight: 550;
+  font-weight: 600;
   white-space: nowrap;
+  transition:
+    background-size 0.55s var(--ease-out),
+    border-color 0.4s var(--ease-out),
+    color 0.3s var(--ease-out) 0.05s,
+    scale 0.12s;
 }
 
 .button:hover:not(:disabled) {
-  background: var(--surface-2);
+  border-color: var(--sweep);
+  background-size: 100% 100%;
+  color: var(--sweep-ink);
+}
+
+.button:active:not(:disabled) {
+  scale: 0.97;
 }
 
 .button:disabled {
   cursor: not-allowed;
-  opacity: 0.55;
+  opacity: 0.4;
 }
 
+/* The ordinary main action: already filled; under the pointer it opens into an outline. */
 .button--primary {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: var(--accent-contrast);
+  border-color: var(--text);
+  background: linear-gradient(var(--text), var(--text)) no-repeat right / 100% 100%;
+  color: var(--bg);
 }
 
 .button--primary:hover:not(:disabled) {
-  border-color: var(--accent-strong);
-  background: var(--accent-strong);
+  border-color: var(--text);
+  background-size: 0% 100%;
+  color: var(--text);
 }
 
 .button--danger {
+  --sweep: var(--danger);
+
   border-color: var(--danger);
   color: var(--danger);
 }
 
+/* A quiet action is only its words; a line draws under them. */
 .button--quiet {
   border-color: transparent;
-  background: transparent;
-  font-weight: 500;
+  background: linear-gradient(currentColor, currentColor) no-repeat left calc(100% - 5px) / 0% 1px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.button--quiet:hover:not(:disabled) {
+  border-color: transparent;
+  background-size: 100% 1px;
+  color: var(--text);
 }
 
 .button--small {
   min-height: 28px;
-  padding: 3px 9px;
+  padding: 3px 10px;
   font-size: 13px;
 }
 
 .icon-button {
   display: inline-flex;
+  flex: none;
   align-items: center;
   justify-content: center;
   width: 32px;
   height: 32px;
+  padding: 0;
   border: 0;
   border-radius: var(--radius-s);
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
+  transition:
+    background-color 0.35s var(--ease-out),
+    color 0.35s var(--ease-out),
+    scale 0.12s;
 }
 
 .icon-button:hover {
-  background: var(--surface-2);
+  background: var(--surface-3);
   color: var(--text);
+}
+
+.icon-button:active {
+  scale: 0.92;
+}
+
+/* Closing turns the cross a quarter. */
+.dialog__header .icon-button svg {
+  transition: rotate 0.6s var(--ease-out);
+}
+
+.dialog__header .icon-button:hover svg {
+  rotate: 90deg;
 }
 
 .badge {
@@ -225,11 +355,12 @@ textarea {
   align-items: center;
   gap: 4px;
   padding: 1px 7px;
-  border-radius: 999px;
+  border-radius: var(--radius-s);
   background: var(--surface-3);
   color: var(--text-muted);
   font-size: 11.5px;
-  font-weight: 600;
+  font-weight: 650;
+  line-height: 1.6;
   white-space: nowrap;
 }
 
@@ -252,7 +383,7 @@ textarea {
 
 .field {
   display: grid;
-  gap: 4px;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -263,16 +394,25 @@ textarea {
   gap: 8px;
 }
 
+/* What a control is called, in the instrument's lettering (as `.label`, a size down). */
 .field__label {
   padding: 0;
   color: var(--text-muted);
-  font-size: 12.5px;
-  font-weight: 600;
+  font: 560 10px / 1.4 var(--font-display);
+  font-stretch: 135%;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+/* A legend takes no part in its fieldset's layout, so it brings its own space. */
+legend.field__label {
+  padding-bottom: 6px;
 }
 
 .field__note {
   color: var(--text-faint);
   font-size: 12.5px;
+  line-height: 1.45;
 }
 
 .field__note--warn {
@@ -287,15 +427,39 @@ textarea {
 .input,
 .textarea {
   width: 100%;
-  min-height: 34px;
-  padding: 6px 9px;
+  min-height: 36px;
+  padding: 7px 10px;
   border: 1px solid var(--control-border);
-  border-radius: var(--radius-s);
+  border-radius: var(--radius);
   background: var(--surface);
+  transition:
+    border-color 0.35s var(--ease-out),
+    box-shadow 0.35s var(--ease-out);
+}
+
+.select:hover:not(:disabled),
+.input:hover:not(:disabled),
+.textarea:hover:not(:disabled) {
+  border-color: var(--text-muted);
+}
+
+.select:focus-visible,
+.input:focus-visible,
+.textarea:focus-visible {
+  border-color: var(--text);
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--text) 16%, transparent);
 }
 
 .select {
+  appearance: none;
+  padding-right: 32px;
+  /* A mid grey that reads on both themes; a data URI, so nothing is fetched. */
+  background: var(--surface)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238a8a83' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")
+    no-repeat right 11px center;
   text-overflow: ellipsis;
+  cursor: pointer;
 }
 
 .textarea {
@@ -306,18 +470,19 @@ textarea {
 .select:disabled,
 .input:disabled,
 .textarea:disabled {
-  opacity: 0.6;
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .is-disabled {
   opacity: 0.55;
 }
 
-/* switch */
+/* switch: a mechanical toggle, a square cap sliding in a slot */
 
 .switch {
   display: grid;
-  gap: 2px;
+  gap: 3px;
 }
 
 .switch__control {
@@ -325,7 +490,7 @@ textarea {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   cursor: pointer;
 }
 
@@ -334,7 +499,7 @@ textarea {
   top: 50%;
   left: 0;
   opacity: 0;
-  width: 34px;
+  width: 36px;
   height: 20px;
   margin: -10px 0 0;
   cursor: pointer;
@@ -343,11 +508,11 @@ textarea {
 .switch__track {
   flex: none;
   position: relative;
-  width: 34px;
+  width: 36px;
   height: 20px;
-  border-radius: 999px;
+  border-radius: var(--radius-s);
   background: var(--control-border);
-  transition: background 0.12s;
+  transition: background-color 0.4s var(--ease-out);
 }
 
 .switch__track::after {
@@ -357,10 +522,23 @@ textarea {
   left: 2px;
   width: 16px;
   height: 16px;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.3);
-  transition: transform 0.12s;
+  border-radius: 1px;
+  /* Ridged like a slide switch's cap, so it reads as the part that moves. */
+  background:
+    linear-gradient(
+      90deg,
+      transparent 5px,
+      rgb(0 0 0 / 0.18) 5px 6px,
+      transparent 6px 7.5px,
+      rgb(0 0 0 / 0.18) 7.5px 8.5px,
+      transparent 8.5px 10px,
+      rgb(0 0 0 / 0.18) 10px 11px,
+      transparent 11px
+    ),
+    var(--bg);
+  transition:
+    translate 0.5s var(--ease-out),
+    background-color 0.4s var(--ease-out);
 }
 
 .switch__control input:checked + .switch__track {
@@ -368,27 +546,29 @@ textarea {
 }
 
 .switch__control input:checked + .switch__track::after {
-  transform: translateX(14px);
+  translate: 16px 0;
+  background-color: var(--accent-contrast);
 }
 
 .switch__control input:focus-visible + .switch__track {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline: 1px solid var(--accent);
+  outline-offset: 3px;
 }
 
 .switch__label {
-  font-weight: 500;
+  font-weight: 550;
 }
 
 .switch__note {
-  padding-left: 43px;
+  padding-left: 46px;
 }
 
-/* slider */
+/* slider: a hairline track filled up to the value (`--fill`, set by the component), with a
+   fader cap for a thumb */
 
 .slider {
   display: grid;
-  gap: 2px;
+  gap: 4px;
 }
 
 .slider__head {
@@ -400,21 +580,67 @@ textarea {
 
 .slider__value {
   color: var(--text-muted);
-  font-size: 12.5px;
+  font: 11px var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
 .slider input[type='range'] {
+  --track: linear-gradient(to right, var(--accent) var(--fill, 50%), var(--surface-3) var(--fill, 50%));
+
   width: 100%;
-  margin: 2px 0;
-  accent-color: var(--accent);
+  height: 22px;
+  margin: 0;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.slider input[type='range']:focus-visible {
+  outline: none;
+}
+
+.slider input[type='range']::-webkit-slider-runnable-track {
+  height: 2px;
+  background: var(--track);
+}
+
+.slider input[type='range']::-moz-range-track {
+  height: 2px;
+  background: var(--track);
+}
+
+.slider input[type='range']::-webkit-slider-thumb {
+  width: 10px;
+  height: 20px;
+  margin-top: -9px;
+  border: 1px solid var(--text);
+  border-radius: 1px;
+  appearance: none;
+  background: linear-gradient(transparent 9px, var(--text) 9px 10px, transparent 10px), var(--bg);
+  transition: box-shadow 0.35s var(--ease-out);
+}
+
+.slider input[type='range']::-moz-range-thumb {
+  width: 10px;
+  height: 20px;
+  border: 1px solid var(--text);
+  border-radius: 1px;
+  background: linear-gradient(transparent 9px, var(--text) 9px 10px, transparent 10px), var(--bg);
+}
+
+.slider input[type='range']:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 28%, transparent);
+}
+
+.slider input[type='range']:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 28%, transparent);
 }
 
 /* segmented control */
 
 .segmented {
   display: grid;
-  gap: 4px;
+  gap: 6px;
   min-width: 0;
   margin: 0;
   padding: 0;
@@ -424,9 +650,8 @@ textarea {
 .segmented__options {
   display: flex;
   padding: 2px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-s);
-  background: var(--surface-2);
+  border-radius: var(--radius);
+  box-shadow: inset 0 0 0 1px var(--hair-strong);
 }
 
 .segmented__option {
@@ -446,68 +671,156 @@ textarea {
   cursor: pointer;
 }
 
-.segmented__option span {
-  display: block;
-  padding: 4px 8px;
-  border-radius: 4px;
+.segmented__option > span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 3px 10px;
+  border-radius: 1px;
   color: var(--text-muted);
   font-size: 13px;
-  font-weight: 550;
+  font-weight: 600;
   text-align: center;
+  transition:
+    background-color 0.45s var(--ease-out),
+    color 0.45s var(--ease-out);
 }
 
-.segmented__option input:checked + span {
-  background: var(--surface);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.14);
+.segmented__option:hover input:not(:checked) + span {
+  background: var(--surface-3);
   color: var(--text);
 }
 
+.segmented__option input:checked + span {
+  background: var(--text);
+  color: var(--bg);
+}
+
 .segmented__option input:focus-visible + span {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  outline: 1px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.segmented:disabled .segmented__option {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 /* ------------------------------------------------------------------ dialog */
 
+/*
+ * The native <dialog>, centred, or as a sheet along the right edge. It arrives out of the
+ * dark and goes back into it quicker than it came: `display` and `overlay` wait for the
+ * fade (allow-discrete), and the component keeps the content for that moment.
+ */
 .dialog {
+  /* Hung from a fixed height rather than centred: when its content changes (a message strip
+     opening or closing inside it) it grows and shrinks downwards, and nothing above moves. */
+  --dialog-top: clamp(12px, 8vh, 88px);
+
   width: min(760px, calc(100vw - 24px));
-  max-height: min(820px, calc(100dvh - 24px));
+  max-height: min(840px, calc(100dvh - var(--dialog-top) - 12px));
+  margin: var(--dialog-top) auto auto;
   padding: 0;
-  border: 1px solid var(--border);
+  border: 1px solid var(--hair-strong);
   border-radius: var(--radius-l);
-  background: var(--surface);
+  background: var(--surface-2);
   color: var(--text);
   box-shadow: var(--shadow-pop);
+  opacity: 0;
+  translate: 0 10px;
+  transition:
+    opacity 0.24s ease-in,
+    translate 0.24s ease-in,
+    overlay 0.24s allow-discrete,
+    display 0.24s allow-discrete;
+}
+
+.dialog[open] {
+  opacity: 1;
+  translate: 0 0;
+  transition:
+    opacity 0.45s var(--ease-out),
+    translate 0.6s var(--ease-out),
+    scale 0.6s var(--ease-out);
+}
+
+@starting-style {
+  .dialog[open] {
+    opacity: 0;
+    translate: 0 22px;
+    scale: 0.985;
+  }
 }
 
 .dialog::backdrop {
-  background: rgb(8 10 16 / 0.5);
+  background: rgb(0 0 0 / 0);
+  transition:
+    background-color 0.24s ease-in,
+    overlay 0.24s allow-discrete,
+    display 0.24s allow-discrete;
+}
+
+.dialog[open]::backdrop {
+  background: rgb(0 0 0 / 0.62);
+  transition: background-color 0.5s var(--ease-out);
+}
+
+@starting-style {
+  .dialog[open]::backdrop {
+    background: rgb(0 0 0 / 0);
+  }
 }
 
 .dialog__frame {
   display: flex;
   flex-direction: column;
-  max-height: min(820px, calc(100dvh - 26px));
+  max-height: min(838px, calc(100dvh - var(--dialog-top) - 14px));
 }
 
 .dialog__header {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 14px 16px 12px 20px;
-  border-bottom: 1px solid var(--border);
+  gap: 12px;
+  padding: 16px 14px 14px 22px;
+  border-bottom: 1px solid var(--hair);
+}
+
+.dialog__header > svg {
+  flex: none;
+  color: var(--text-muted);
+}
+
+.dialog__titles {
+  display: grid;
+  flex: 1;
+  gap: 3px;
+  min-width: 0;
 }
 
 .dialog__title {
-  flex: 1;
-  font-size: 17px;
-  font-weight: 650;
+  font: 420 19px / 1.2 var(--font-display);
+  font-stretch: 122%;
+  letter-spacing: 0.01em;
+}
+
+.dialog__subtitle {
+  color: var(--text-muted);
+  font-size: 12.5px;
 }
 
 .dialog__body {
   flex: 1;
   overflow-y: auto;
-  padding: 18px 20px 22px;
+  padding: 20px 22px 24px;
+  scrollbar-width: thin;
+}
+
+/* What is inside follows the frame a moment later. */
+.dialog[open] .dialog__body {
+  animation: fade-in 0.5s var(--ease-out) 0.08s backwards;
 }
 
 .dialog__footer {
@@ -515,8 +828,32 @@ textarea {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 20px;
-  border-top: 1px solid var(--border);
+  padding: 10px 22px;
+  border-top: 1px solid var(--hair);
   color: var(--text-faint);
   font-size: 12.5px;
+}
+
+.dialog--sheet {
+  width: min(440px, 100vw);
+  max-width: 100vw;
+  height: 100dvh;
+  max-height: 100dvh;
+  margin: 0 0 0 auto;
+  border-width: 0 0 0 1px;
+  border-radius: 0;
+  translate: 24px 0;
+}
+
+@starting-style {
+  .dialog--sheet[open] {
+    opacity: 0;
+    translate: 56px 0;
+    scale: 1;
+  }
+}
+
+.dialog--sheet .dialog__frame {
+  height: 100%;
+  max-height: none;
 }

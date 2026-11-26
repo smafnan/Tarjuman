@@ -159,7 +159,7 @@ export function SetupGuide({
             </li>
             <li>
               <strong>Any system, most reliable:</strong> set the Teams speaker to a second virtual cable and
-              select it under "Audio device" in the "They speak" panel.
+              select it under "Audio device" in the devices and voice of "They speak".
             </li>
           </ul>
           <div className="step__actions">

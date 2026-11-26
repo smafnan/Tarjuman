@@ -64,6 +64,8 @@ export interface IncomingLocalSettings {
 }
 
 export interface UiSettings {
+  /** The interface is dark by design; `light` is the daylight variant. `system`, saved by
+      earlier versions, is shown dark. */
   theme: 'system' | 'light' | 'dark';
   /** Typeface for Urdu captions. Nastaliq is the traditional Urdu style; Naskh is more compact. */
   urduFont: 'nastaliq' | 'naskh';

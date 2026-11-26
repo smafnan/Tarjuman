@@ -8,7 +8,10 @@ import { useAppStore } from '../../state/store';
 import { controller } from '../controller';
 import { Segmented } from './controls';
 
-/** Type instead of speaking: handy without a microphone, for names, or to test a channel. */
+/**
+ * Type instead of speaking: handy without a microphone, for names, or to test a channel.
+ * The field and its button take the colour of whoever "says" the text.
+ */
 export function Composer() {
   const [channel, setChannel] = useState<ChannelId>('outgoing');
   const [text, setText] = useState('');
@@ -23,7 +26,7 @@ export function Composer() {
 
   return (
     <form
-      className="composer"
+      className={`composer composer--${channel}`}
       onSubmit={(event) => {
         event.preventDefault();
         send();
@@ -34,34 +37,40 @@ export function Composer() {
         hideLabel
         value={channel}
         options={[
-          { value: 'outgoing', label: 'I say' },
-          { value: 'incoming', label: 'They say' },
+          { value: 'outgoing', label: <span className="who who--outgoing">I say</span> },
+          { value: 'incoming', label: <span className="who who--incoming">They say</span> },
         ]}
         onChange={setChannel}
       />
-      <textarea
-        className="textarea"
-        rows={1}
-        dir="auto"
-        maxLength={LIMITS.maxTextChars}
-        value={text}
-        disabled={!connected}
-        aria-label={`Type in ${LANGUAGES[sourceLang].name}`}
-        placeholder={
-          connected ? `Type in ${LANGUAGES[sourceLang].name} instead of speaking…` : 'Not connected'
-        }
-        onChange={(event) => setText(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-            event.preventDefault();
-            send();
+      <div className="composer__field">
+        <textarea
+          rows={1}
+          dir="auto"
+          maxLength={LIMITS.maxTextChars}
+          value={text}
+          disabled={!connected}
+          aria-label={`Type in ${LANGUAGES[sourceLang].name}`}
+          placeholder={
+            connected ? `Type in ${LANGUAGES[sourceLang].name} instead of speaking…` : 'Not connected'
           }
-        }}
-      />
-      <button type="submit" className="button button--primary" disabled={!connected || !text.trim()}>
-        <SendHorizontal size={16} aria-hidden="true" />
-        Translate
-      </button>
+          onChange={(event) => setText(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              send();
+            }
+          }}
+        />
+        <button
+          type="submit"
+          className="composer__send"
+          title="Translate (Enter)"
+          disabled={!connected || !text.trim()}
+        >
+          <SendHorizontal size={16} aria-hidden="true" />
+          <span className="composer__send-label">Translate</span>
+        </button>
+      </div>
     </form>
   );
 }

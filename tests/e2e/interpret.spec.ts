@@ -29,8 +29,8 @@ test('interprets typed text', async ({ page }) => {
   await expect(entry.locator('.entry__source')).toHaveAttribute('dir', 'rtl');
   await expect(entry.locator('.entry__target')).toHaveAttribute('lang', 'de');
   await expect(entry.locator('.entry__target')).not.toBeEmpty();
-  // The translated voice was played: the latency badge only appears once audio starts.
-  await expect(entry.locator('.badge')).toHaveText(/\d\.\d s/);
+  // The translated voice was played: the latency only appears once audio starts.
+  await expect(entry.locator('.entry__latency')).toHaveText(/\d\.\d s/);
   expect(problems).toEqual([]);
 });
 
@@ -44,7 +44,7 @@ test('listens to the microphone and interprets each spoken sentence', async ({ p
 
   // The recording holds two sentences separated by a pause; each must become its own entry.
   await expect(translations(page)).toHaveCount(2, { timeout: 40_000 });
-  await expect(page.locator('.entry .badge').first()).toHaveText(/\d\.\d s/);
+  await expect(page.locator('.entry .entry__latency').first()).toHaveText(/\d\.\d s/);
   // Speech detection saw speech (the panel reported it at least once, or entries exist) and
   // nothing was dropped as noise.
   await expect(page.locator('.entry--muted')).toHaveCount(0);

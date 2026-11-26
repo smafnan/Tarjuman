@@ -63,20 +63,22 @@ The modules disappear on reboot unless you add them to your PipeWire/PulseAudio 
 Open the setup guide in the app. Step 1 lists the virtual devices it found. If device
 names are hidden, press **Show device names** and allow microphone access.
 
-In a narrow window (980 px wide or less, or 720 px high or less) the two channel panels sit
-in a strip above the conversation, and their device, voice and Advanced controls are folded
-behind a **Devices and voice** button. Press it to reach the lists named below, or make the
-window larger.
+The device lists named below, the voice and the Advanced options of each direction are in
+a side sheet: press **Devices and voice** in _You speak_ or _They speak_ at the top of the
+window. The sheet shows the live level of that direction, so you can see a microphone
+react while you choose it.
 
 ---
 
 ## 2. Send your translated voice into Teams
 
-**In Tarjuman** (panel _You speak_):
+**In Tarjuman** (_You speak_ → **Devices and voice**):
 
 - **Microphone**: your real microphone or headset.
 - **Translated voice goes to**: the cable's playback end, i.e. _CABLE Input_, _BlackHole 2ch_
-  or _Tarjuman-Mic_. A green "virtual cable" badge appears.
+  or _Tarjuman-Mic_. A green "virtual cable" badge appears. As long as it is not a cable,
+  _You speak_ says that Teams only hears the translation through a virtual cable, with a
+  button that selects the cable once one is installed.
 
 **In Teams** → _Settings and more (…)_ → _Settings_ → _Devices_:
 
@@ -92,9 +94,10 @@ must play the phrase back.
 
 From now on the people in the call hear the German voice instead of your own. If you want
 them to hear you quietly underneath, as with a human interpreter, raise
-_Advanced → Let them hear my own voice underneath_ to about 10–15 %.
+_Devices and voice → Advanced → Let them hear my own voice underneath_ to about 10–15 %.
 
-To check what the others hear, raise _Advanced → Hear my translation in my headphones_.
+To check what the others hear, raise _Advanced → Hear my translation in my headphones_ in
+the same sheet.
 It is at 0 % by default, so you do not hear your own translation.
 
 ---
@@ -106,8 +109,8 @@ Pick the option that matches how you run Teams.
 ### A. Teams in a browser tab (simplest, works on every system)
 
 1. Join the meeting at <https://teams.microsoft.com> in a Chrome tab.
-2. In Tarjuman (panel _They speak_) keep **Browser tab or screen** selected and press
-   **Capture their audio**.
+2. In Tarjuman, _They speak_ → **Devices and voice** → _Listen to_ should be **Browser tab
+   or screen** (the default). Press **Capture their audio**.
 3. In Chrome's dialog choose the **Chrome Tab** with Teams and make sure
    **Also share tab audio** is ticked. Press _Share_.
 
@@ -115,8 +118,9 @@ Only audio is used; nothing is recorded or sent as video. A tab contains only th
 participants' voices, so there is no risk of Tarjuman hearing itself.
 
 You will hear the original German from the Teams tab and the Urdu voice from Tarjuman at
-the same time. Either lower the volume in Teams, or switch on _Advanced → Mute the captured
-tab itself_ before capturing: the tab goes silent, and Tarjuman replays the original at the
+the same time. Either lower the volume in Teams, or switch on _They speak → Devices and
+voice → Advanced → Mute the captured tab itself_ before capturing: the tab goes silent, and
+Tarjuman replays the original at the
 volume you set, lowered automatically while the translation is spoken.
 
 ### B. Teams desktop app on Windows
@@ -137,9 +141,9 @@ This option is not available on Linux, and on macOS only from version 14.2.
    `brew install blackhole-16ch`; Linux: a second null sink with remap source).
 2. In Teams → Settings → Devices set **Speaker** to that second cable. Never use the same
    cable for the microphone and the speaker.
-3. In Tarjuman (panel _They speak_) choose **Audio device** and select the second cable's
-   recording end.
-4. Set _Advanced → Original voice volume_ to taste. Because the call no longer reaches your
+3. In Tarjuman (_They speak_ → **Devices and voice**) choose **Audio device** and select the
+   second cable's recording end.
+4. Set _Advanced → Original voice volume_ in the same sheet to taste. Because the call no longer reaches your
    headphones directly, Tarjuman replays it for you underneath the translation.
 
 No sharing dialog, nothing to re-approve at every call, and no way for sounds to mix.
@@ -162,10 +166,12 @@ No sharing dialog, nothing to re-approve at every call, and no way for sounds to
 ## 4. During the call
 
 - Press **Start microphone** and **Capture their audio**. Both stay on for the whole call.
-- Speak a sentence, pause briefly. The entry in the transcript shows your words, the German
-  translation and English; the small number is the delay until the voice started.
+- Speak a sentence, pause briefly. The conversation shows your words, the German
+  translation and English; the small number beside it is the delay until the voice started.
+  In a wide window each language has its own column (German, English, Urdu), in the same
+  place whoever spoke, so you can read the whole call in Urdu down the right-hand column.
 - If translated speech piles up ("x s of speech queued"), press **Skip** to jump to now.
-- **Push-to-talk** (panel _You speak_ → Advanced): hold **Space** to talk. It works only
+- **Push-to-talk** (_You speak_ → **Devices and voice** → Advanced): hold **Space** to talk. It works only
   while the Tarjuman window has focus. Holding Space while Teams is in front goes to Teams,
   so click the Tarjuman window first. The status text says "Hold Space to talk while this
   window is focused".
@@ -191,7 +197,7 @@ the tab), and choose _Allow while visiting the site_ when Chrome asks about the 
 | No device names in the lists                                    | Press _Show device names_ and allow the microphone.                                                                                                                                                                    |
 | It stops when I switch to the Teams window                      | The Tarjuman window was minimised, or the tab was discarded. Keep it open in its own window.                                                                                                                           |
 | "Translated speech cannot be played: the audio device stopped." | The device behind "Translated voice plays on" or "Translated voice goes to" was unplugged or switched off (a headset, for example). Connect it again, or choose another one, and press **Resume audio** in the banner. |
-| The device, voice and Advanced controls are missing             | The window is narrow or low (980 px wide or 720 px high, or less). Press the **Devices and voice** button of the channel, or make the window larger.                                                                   |
+| Where are the device, voice and Advanced controls?              | In a side sheet: press **Devices and voice** in _You speak_ or _They speak_ at the top of the window.                                                                                                                  |
 | Holding Space does nothing for push-to-talk                     | Space works only while the Tarjuman window has focus. Click the Tarjuman window first; with Teams in front the key goes to Teams.                                                                                      |
 | You hear no translation of what the others say                  | If the Windows default output is the cable, the translation goes there. Set **Translated voice plays on** to your headphones.                                                                                          |
 | After a Windows update the cable is gone                        | Reinstall VB-CABLE as administrator and restart.                                                                                                                                                                       |

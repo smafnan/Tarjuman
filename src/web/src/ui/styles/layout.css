@@ -1,6 +1,9 @@
 /* Page layout and the application-specific components. */
 
 .app {
+  /* The page's one left edge: the masthead, both units and the conversation start on it. */
+  --page-x: 24px;
+
   display: grid;
   /* minmax(0, ...) on both axes: a long unbroken word must never widen the page. */
   grid-template-columns: minmax(0, 1fr);
@@ -8,49 +11,130 @@
   height: 100dvh;
 }
 
-/* ------------------------------------------------------------------ top bar */
+/* Grain over the dark, as on film: it keeps large black areas from looking like a switched-off
+   screen. Still, drawn once (a tile of noise, nothing fetched), and never in the way. */
+.app::after {
+  content: '';
+  position: fixed;
+  z-index: 40;
+  inset: 0;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.5 0'/%3E%3C/filter%3E%3Crect width='220' height='220' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: 0.085;
+  pointer-events: none;
+}
 
+:root[data-theme='light'] .app::after {
+  display: none;
+}
+
+/* The nuqta: the rhombus-shaped dot of Arabic calligraphy, used as the mark of a speaker. */
+.nuqta {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+  background: currentColor;
+  rotate: 45deg;
+}
+
+/* ------------------------------------------------------------------ masthead */
+
+/* A rule across the top of the dark, carrying the name and the state of the line. */
 .topbar {
+  position: relative;
+  z-index: 5;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px 18px;
-  padding: 10px 18px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
+  gap: 8px 22px;
+  min-height: 56px;
+  padding: 8px 12px 8px var(--page-x);
+  border-bottom: 1px solid var(--hair);
+  background: var(--bg);
 }
 
 .brand {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
+  align-items: center;
+  gap: 13px;
+  margin: 0;
+  font: inherit;
 }
 
+.brand__mark {
+  flex: none;
+  width: 28px;
+  height: 28px;
+}
+
+.brand__bowl {
+  fill: var(--text);
+}
+
+.brand__them {
+  fill: var(--them);
+}
+
+.brand__you {
+  fill: var(--you);
+}
+
+/* The name set as the instrument's own lettering: wide capitals, far apart. */
 .brand__name {
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
+  font: 520 13px / 1 var(--font-display);
+  font-stretch: 151%;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
 }
 
-.brand__ur {
-  color: var(--text-muted);
-  font-size: 16px;
-  line-height: 1.2 !important;
+.pair {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 20px;
+  border-left: 1px solid var(--hair-strong);
+  font: 460 13.5px / 1.2 var(--font-display);
+  font-stretch: 118%;
+  letter-spacing: 0.02em;
+}
+
+.pair .icon-button {
+  width: 28px;
+  height: 28px;
+}
+
+/* Swapping turns the arrows over. */
+.pair .icon-button svg {
+  transition: rotate 0.7s var(--ease-out);
+}
+
+.pair .icon-button:hover svg {
+  rotate: 180deg;
+}
+
+.topbar__spacer {
+  flex: 1;
 }
 
 .connection {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   color: var(--text-muted);
-  font-size: 12.5px;
+  font: 520 10px / 1.2 var(--font-display);
+  font-stretch: 135%;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .dot {
-  width: 8px;
-  height: 8px;
+  flex: none;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: var(--text-faint);
+  transition: background-color 0.5s;
 }
 
 .dot--ok {
@@ -65,81 +149,131 @@
   background: var(--danger);
 }
 
-.pair {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 600;
+.connection .dot--warn {
+  animation: blink 1.2s ease-in-out infinite;
 }
 
-.chips {
-  display: flex;
-  flex: 1 1 320px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 6px;
-  min-width: 0;
+@keyframes blink {
+  50% {
+    opacity: 0.3;
+  }
 }
 
-.chip-wrap {
+/* The three services as one quiet button: silent while all is well, specific when not. */
+.services {
   position: relative;
 }
 
-.chip {
+/* No box at rest: the three dots read as a status line; the edge appears under the pointer. */
+.services__button {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  max-width: 250px;
-  padding: 4px 10px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface);
+  gap: 14px;
+  min-height: 32px;
+  padding: 4px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
   cursor: pointer;
-  font-size: 12.5px;
+  font: 520 10px / 1.2 var(--font-display);
+  font-stretch: 135%;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transition:
+    border-color 0.45s var(--ease-out),
+    background-color 0.45s var(--ease-out);
 }
 
-.chip:hover {
+.services__button:hover,
+.services__button[aria-expanded='true'] {
+  border-color: var(--hair-strong);
   background: var(--surface-2);
 }
 
-.chip__kind {
+.service {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   color: var(--text-muted);
-  font-weight: 600;
   white-space: nowrap;
 }
 
-.chip__value {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.service__problem {
+  font-weight: 650;
 }
 
+.service--warn .service__problem {
+  color: var(--warn);
+}
+
+.service--danger .service__problem {
+  color: var(--danger);
+}
+
+/* Above the toasts (50): a list that was asked for must not be covered by a message. It
+   unfolds downwards from its button. */
 .popover {
   position: absolute;
-  z-index: 20;
-  top: calc(100% + 6px);
+  z-index: 60;
+  top: calc(100% + 8px);
   right: 0;
+  width: 400px;
   max-width: calc(100vw - 16px);
-  width: 360px;
-  padding: 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
+  max-height: min(560px, calc(100dvh - 80px));
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--hair-strong);
+  border-radius: var(--radius-l);
+  background: var(--surface-2);
+  color: var(--text);
   box-shadow: var(--shadow-pop);
+  animation: unfold 0.7s var(--ease-out) backwards;
+}
+
+@keyframes unfold {
+  from {
+    opacity: 0;
+    clip-path: inset(0 0 100% 0);
+    translate: 0 -8px;
+  }
+
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+.popover__section {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px 10px;
+}
+
+.popover__section + .popover__section {
+  border-top: 1px solid var(--hair);
 }
 
 .popover__title {
-  margin-bottom: 6px;
-  color: var(--text-muted);
-  font-size: 12px;
-  font-weight: 650;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+  font: 520 11px / 1.4 var(--font-display);
+  font-stretch: 135%;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+}
+
+.popover__note {
+  color: var(--text-faint);
+  font: 11.5px var(--font-ui);
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .chain {
   display: grid;
-  gap: 6px;
+  gap: 8px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -147,15 +281,32 @@
 
 .chain__item {
   display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: 2px 8px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 1px 9px;
   font-size: 13px;
 }
 
+.chain__item > .dot {
+  margin-top: 7px;
+}
+
+.chain__name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .chain__id {
+  display: block;
   color: var(--text-faint);
-  font: 11px var(--font-mono);
+  font: 10px / 1.6 var(--font-mono);
+}
+
+.chain__state {
+  padding-top: 1px;
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .chain__detail {
@@ -167,7 +318,28 @@
 
 .topbar__actions {
   display: flex;
-  gap: 6px;
+  gap: 2px;
+}
+
+/* Quiet in the masthead: words and an icon, with a line that draws under them. */
+.topbar__actions .button {
+  border-color: transparent;
+  background: linear-gradient(currentColor, currentColor) no-repeat left calc(100% - 4px) / 0% 1px;
+  color: var(--text-muted);
+}
+
+.topbar__actions .button:hover {
+  border-color: transparent;
+  background-size: 100% 1px;
+  color: var(--text);
+}
+
+.topbar__actions .button svg {
+  transition: rotate 0.8s var(--ease-out);
+}
+
+.topbar__actions .button:hover svg {
+  rotate: 90deg;
 }
 
 .menu {
@@ -176,29 +348,35 @@
 
 .menu__list {
   position: absolute;
-  z-index: 20;
+  z-index: 60;
   right: 0;
   top: calc(100% + 4px);
   display: grid;
-  min-width: 150px;
-  padding: 4px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-s);
-  background: var(--surface);
+  min-width: 160px;
+  padding: 5px;
+  border: 1px solid var(--hair-strong);
+  border-radius: var(--radius-l);
+  background: var(--surface-2);
   box-shadow: var(--shadow-pop);
+  animation: unfold 0.6s var(--ease-out) backwards;
 }
 
 .menu__list button {
-  padding: 6px 10px;
+  padding: 7px 10px;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--radius-s);
   background: transparent;
   cursor: pointer;
   text-align: left;
+  transition:
+    background-color 0.35s var(--ease-out),
+    padding 0.45s var(--ease-out);
 }
 
-.menu__list button:hover {
-  background: var(--surface-2);
+.menu__list button:hover,
+.menu__list button:focus-visible {
+  padding-left: 14px;
+  background: var(--surface-3);
 }
 
 /* ------------------------------------------------------------------ banners */
@@ -212,10 +390,11 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 12px;
-  padding: 8px 18px;
-  border-bottom: 1px solid var(--border);
+  padding: 9px var(--page-x);
+  border-bottom: 1px solid color-mix(in oklab, var(--warn) 30%, var(--border));
   background: var(--warn-soft);
   color: var(--text);
+  animation: fade-in 0.3s var(--ease-out) backwards;
 }
 
 .banner svg {
@@ -224,6 +403,7 @@
 }
 
 .banner--danger {
+  border-bottom-color: color-mix(in oklab, var(--danger) 30%, var(--border));
   background: var(--danger-soft);
 }
 
@@ -240,142 +420,486 @@
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(330px, 400px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   min-height: 0;
 }
 
-.sidebar {
+/*
+ * The console: the surface both voices travel on, with your side at its left end and theirs,
+ * mirrored, at its right, and two measurements over the middle. Both sides share its rows
+ * (titles above the surface, the surface, the controls below it, notes), so they line up
+ * across the middle. Their sizes are asked of the console: a side that were a size container
+ * itself could not share the rows. The surface gets deeper the taller the window is.
+ */
+.console {
+  container: console / inline-size;
   position: relative;
+  isolation: isolate;
   display: grid;
-  align-content: start;
-  gap: 12px;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 14px;
-  border-right: 1px solid var(--border);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: auto minmax(clamp(72px, calc(46vh - 250px), 240px), 1fr) auto auto;
+  column-gap: 40px;
+  padding: 20px var(--page-x) 18px;
+  border-bottom: 1px solid var(--hair);
+  background: var(--bg);
+}
+
+/* The surface. Its colours are ordinary properties, so that the drawing can read them
+   resolved: line, your voice (left edge), their voice (right edge), ground (outline). The
+   drawing keeps itself between the titles and the controls, and fades at both edges. */
+.console__field {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0 solid;
+  border-right-color: var(--them);
+  border-left-color: var(--you);
+  outline: 0 solid var(--bg);
+  color: var(--text);
 }
 
 .reading {
   position: relative;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   min-width: 0;
   min-height: 0;
-}
-
-/* ------------------------------------------------------------------ channel panel */
-
-.panel {
-  display: grid;
-  gap: 12px;
-  padding: 14px;
-  border: 1px solid var(--border);
-  border-top: 3px solid var(--channel);
-  border-radius: var(--radius);
   background: var(--surface);
-  box-shadow: var(--shadow);
 }
 
-.panel__body {
+.reading > .toolbar {
+  grid-row: 1;
+}
+
+.reading > .transcript {
+  grid-row: 3;
+}
+
+.reading > .composer {
+  grid-row: 4;
+}
+
+/* ------------------------------------------------------------------ channel unit */
+
+.module {
+  position: relative;
   display: grid;
-  gap: 12px;
+  grid-row: 1 / -1;
+  grid-column: 1;
+  /* One column that never grows past the side, whatever its contents would like. */
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: subgrid;
+  min-width: 0;
 }
 
-.panel__toggle {
-  display: none;
+/* Their side is the mirror of yours: everything hangs from the right. */
+.module--incoming {
+  grid-column: 2;
+  justify-items: end;
+  text-align: right;
 }
 
-.panel--outgoing,
+.module--outgoing,
 .entry--outgoing,
-.tag--outgoing {
-  --channel: var(--out);
-  --channel-soft: var(--out-soft);
+.who--outgoing,
+.composer--outgoing,
+.speaker--outgoing {
+  --channel: var(--you);
+  --field: var(--you-field);
 }
 
-.panel--incoming,
+.module--incoming,
 .entry--incoming,
-.tag--incoming {
-  --channel: var(--in);
-  --channel-soft: var(--in-soft);
+.who--incoming,
+.composer--incoming,
+.speaker--incoming {
+  --channel: var(--them);
+  --field: var(--them-field);
 }
 
-.panel__head {
+.module__head {
+  display: grid;
+  gap: 10px;
+  grid-row: 1;
+  min-width: 0;
+}
+
+/* Which way this side interprets, wide and light. It gains weight while its voice speaks. */
+.module__title {
+  color: var(--text-muted);
+  font: 280 clamp(24px, 2.75vw, 42px) / 1.05 var(--font-display);
+  font-stretch: 128%;
+  letter-spacing: -0.012em;
+  white-space: nowrap;
+  transition:
+    color 1.2s var(--ease-out),
+    font-weight 1.1s var(--ease-out),
+    font-stretch 1.1s var(--ease-out);
+}
+
+.module.is-live .module__title {
+  color: var(--text);
+}
+
+.module.is-speaking .module__title {
+  font-weight: 430;
+  font-stretch: 134%;
+}
+
+.module__meta {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
+  min-width: 0;
+  min-height: 20px;
 }
 
-.panel__title {
-  font-size: 15px;
-  font-weight: 650;
+.module--incoming .module__meta {
+  flex-direction: row-reverse;
 }
 
-.panel__flow {
-  color: var(--text-muted);
-  font-size: 13px;
+.module__who {
+  flex: none;
+  color: var(--text-faint);
+  transition: color 1s var(--ease-out);
 }
 
-.tag {
-  display: inline-block;
-  padding: 1px 8px;
-  border-radius: 999px;
-  background: var(--channel-soft);
+.module.is-live .module__who {
   color: var(--channel);
-  font-size: 11.5px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
 }
 
-.capture {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: center;
-  gap: 8px 12px;
+/*
+ * The lamp: off is an empty ring; live is lit in the voice's colour; while the voice speaks a
+ * ring leaves it, the way a ripple leaves a dropped stone. It repeats what the key and the
+ * status line say, for a glance from across the desk.
+ */
+.lamp {
+  position: relative;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border: 1px solid var(--text-faint);
+  border-radius: 50%;
+  transition:
+    background-color 0.8s var(--ease-out),
+    border-color 0.8s var(--ease-out);
 }
 
-.capture__button {
-  min-width: 168px;
+.lamp--starting {
+  border-color: var(--channel);
+  animation: blink 1s ease-in-out infinite;
 }
 
-.capture__button.is-live {
+.lamp--live,
+.lamp--speaking {
+  border-color: var(--channel);
+  background: var(--channel);
+}
+
+.lamp--speaking::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border: 1px solid var(--channel);
+  border-radius: 50%;
+  animation: ping 1.6s var(--ease-out) infinite;
+}
+
+@keyframes ping {
+  from {
+    opacity: 0.9;
+    scale: 1;
+  }
+
+  to {
+    opacity: 0;
+    scale: 3.4;
+  }
+}
+
+.lamp--gated {
+  border-color: var(--channel);
+  background: transparent;
+}
+
+.lamp--error {
   border-color: var(--danger);
-  background: var(--surface);
-  color: var(--danger);
+  background: var(--danger);
 }
 
 .status {
   min-width: 0;
+  overflow: hidden;
   color: var(--text-muted);
   font-size: 13px;
-  overflow-wrap: anywhere;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .status--live {
-  color: var(--channel);
+  color: var(--text);
   font-weight: 600;
 }
 
 .status--error {
-  grid-column: 1 / -1;
   color: var(--danger);
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
-.meter {
-  grid-column: 1 / -1;
-  height: 6px;
+.module__deck {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 14px 26px;
+  grid-row: 3;
+  min-width: 0;
+  width: 100%;
+}
+
+.module--incoming .module__deck {
+  flex-direction: row-reverse;
+}
+
+.module__keys {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.module--incoming .module__keys {
+  flex-direction: row-reverse;
+}
+
+/*
+ * The key: an outline in the voice's colour that fills under the pointer, from this side's
+ * own edge. Live, it stays filled, and under the pointer it empties again: the action it
+ * offers is to stop.
+ */
+.key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  /* Wide enough for the longest label, on both sides and in both states: nothing beside the
+     key moves when it changes from start to stop. */
+  width: 246px;
+  min-height: 42px;
+  padding: 8px 14px;
+  border: 1px solid var(--channel);
+  border-radius: var(--radius);
+  background: linear-gradient(var(--field), var(--field)) no-repeat left / 0% 100%;
+  color: var(--channel);
+  cursor: pointer;
+  font: 560 11px / 1 var(--font-display);
+  font-stretch: 132%;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  transition:
+    background-size 0.7s var(--ease-out),
+    color 0.35s var(--ease-out) 0.06s,
+    scale 0.12s;
+}
+
+.module--incoming .key {
+  background-position: right;
+}
+
+.key:hover:not(:disabled),
+.key.is-live {
+  background-size: 100% 100%;
+  color: var(--on-channel);
+}
+
+.key.is-live:hover:not(:disabled) {
+  background-size: 0% 100%;
+  color: var(--channel);
+}
+
+.key:active:not(:disabled) {
+  scale: 0.97;
+}
+
+.key:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+.key.is-live svg {
+  fill: currentColor;
+  animation: blink 1.8s ease-in-out infinite;
+}
+
+/* A square beside the key: its icon alone, its name in the tooltip and for screen readers.
+   Under the pointer the sliders flip. */
+.module__devices {
+  width: 42px;
+  height: 42px;
+  border: 1px solid var(--hair-strong);
+  transition:
+    border-color 0.45s var(--ease-out),
+    color 0.45s var(--ease-out);
+}
+
+.module__devices:hover {
+  border-color: var(--text);
+  background: transparent;
+}
+
+.module__devices svg {
+  transition: scale 0.6s var(--ease-out);
+}
+
+.module__devices:hover svg {
+  scale: 1 -1;
+}
+
+.module__devices-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
   overflow: hidden;
-  border-radius: 999px;
-  background: var(--surface-3);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* No wider than its four steps need: the two pipelines must read as two, one per side, with
+   open ground between them, never as one strip across the console. */
+.module__signal {
+  display: grid;
+  flex: 0 1 330px;
+  gap: 8px;
+  min-width: 0;
+  max-width: 330px;
+}
+
+/*
+ * The pipeline: the four steps a sentence takes, as marks on a line. The step at work is lit
+ * in the voice's colour and a light runs along the line into it; steps already taken stay
+ * filled. On their side the line runs the other way, from their edge inwards.
+ */
+.pipeline {
+  display: flex;
+  align-items: center;
+  margin: 0;
+  padding: 0;
+  color: var(--text-faint);
+  font: 540 9px / 1 var(--font-display);
+  font-stretch: 135%;
+  letter-spacing: 0.1em;
+  list-style: none;
+  text-transform: uppercase;
+  transition: opacity 1s var(--ease-out);
+}
+
+.pipeline.is-off {
+  opacity: 0.5;
+}
+
+.pipeline__stage {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+  transition: color 0.7s var(--ease-out);
+}
+
+.pipeline__stage:last-child {
+  flex: none;
+}
+
+.module--incoming .pipeline,
+.module--incoming .pipeline__stage {
+  flex-direction: row-reverse;
+}
+
+.pipeline__stage::before {
+  content: '';
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border: 1px solid currentColor;
+  rotate: 45deg;
+  transition: background-color 0.7s var(--ease-out);
+}
+
+.pipeline__stage::after {
+  content: '';
+  flex: 1;
+  min-width: 12px;
+  height: 1px;
+  margin-inline: 3px 10px;
+  background: var(--hair-strong);
+}
+
+.module--incoming .pipeline__stage::after {
+  margin-inline: 10px 3px;
+}
+
+.pipeline__stage:last-child::after {
+  display: none;
+}
+
+.pipeline__stage.is-passed {
+  color: var(--text-muted);
+}
+
+.pipeline__stage.is-active {
+  color: var(--channel);
+}
+
+.pipeline__stage.is-passed::before,
+.pipeline__stage.is-active::before {
+  background: currentColor;
+}
+
+.pipeline__stage.is-waiting::before {
+  border-color: var(--channel);
+  animation: blink 2s ease-in-out infinite;
+}
+
+/* The light on the line into the step at work. */
+.pipeline__stage:has(+ .is-active)::after {
+  background: linear-gradient(90deg, var(--hair-strong) 35%, var(--channel) 50%, var(--hair-strong) 65%) 100%
+    0 / 300% 100%;
+  animation: flow 1.5s linear infinite;
+}
+
+.module--incoming .pipeline__stage:has(+ .is-active)::after {
+  animation-direction: reverse;
+}
+
+@keyframes flow {
+  to {
+    background-position: 0 0;
+  }
+}
+
+/* Cut into cells like the meter of a mixing desk: the mask does the cutting. */
+.meter {
+  height: 3px;
+  overflow: hidden;
+  background: var(--hair-strong);
+  mask: repeating-linear-gradient(90deg, #000 0 3px, transparent 3px 5px);
+}
+
+.module--incoming .meter {
+  rotate: 180deg;
 }
 
 .meter__fill {
   width: 100%;
   height: 100%;
-  border-radius: inherit;
   background: var(--channel);
   transform-origin: left center;
-  transition: transform 0.09s linear;
+  transition:
+    transform 0.1s linear,
+    background-color 0.5s;
 }
 
 .meter--gated .meter__fill {
@@ -386,76 +910,306 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px 10px;
-  min-height: 22px;
+  gap: 4px 14px;
+  min-height: 18px;
   color: var(--text-muted);
   font-size: 12.5px;
+}
+
+.module--incoming .activity {
+  justify-content: flex-end;
 }
 
 .activity__item {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
+  white-space: nowrap;
+  animation: rise-in 0.8s var(--ease-out) backwards;
+}
+
+.activity__item .button {
+  min-height: 22px;
+  padding: 0 9px;
+}
+
+.module__extras {
+  display: grid;
+  grid-row: 4;
+  min-width: 0;
+}
+
+.module__extras:empty {
+  display: none;
+}
+
+/* A slip clipped to the console: what would keep the voice from arriving, and the way out. */
+.module__note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 12px;
+  padding: 7px 11px;
+  border: 1px solid var(--hair-strong);
+  border-radius: var(--radius-s);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.4;
+  text-align: left;
+  animation: rise-in 0.9s var(--ease-out) backwards;
+}
+
+.module__note svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--warn);
+}
+
+.module__note--danger svg {
+  color: var(--danger);
+}
+
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font-weight: 650;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  white-space: nowrap;
 }
 
 .ptt {
   width: 100%;
-  min-height: 46px;
-  border: 2px dashed var(--channel);
+  min-height: 44px;
+  margin-top: 12px;
+  border: 1px dashed var(--channel);
   border-radius: var(--radius);
-  background: var(--channel-soft);
+  background: transparent;
   color: var(--channel);
   cursor: pointer;
   font-weight: 650;
   touch-action: none;
   user-select: none;
+  transition:
+    background-color 0.12s,
+    color 0.12s;
 }
 
 .ptt.is-held {
   border-style: solid;
-  background: var(--channel);
-  color: var(--accent-contrast);
+  background: var(--field);
+  color: var(--on-channel);
+}
+
+/* The measurements, over the middle of the console between the two titles. Out of the grid,
+   so each side keeps its whole half for its controls. */
+.telemetry {
+  position: absolute;
+  top: 24px;
+  left: 50%;
+  display: flex;
+  gap: 34px;
+  margin: 0;
+  translate: -50% 0;
+}
+
+/* The key's label: whole where there is room, one word on a phone (the whole name stays the
+   button's name for screen readers). */
+.key__short {
+  display: none;
+}
+
+.telemetry__item {
+  display: grid;
+  justify-items: center;
+  gap: 7px;
+}
+
+.telemetry dt {
+  color: var(--text-faint);
+  font: 520 9.5px / 1 var(--font-display);
+  font-stretch: 135%;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.telemetry dd {
+  margin: 0;
+  font: 400 15px / 1 var(--font-mono);
+  font-variant-numeric: tabular-nums slashed-zero;
+  animation: tick 1s var(--ease-out) backwards;
+}
+
+/* A figure that changed rolls up into place, like a counter's wheel: it rises behind the
+   edge of its own box (the clip shrinks as it rises). */
+@keyframes tick {
+  from {
+    clip-path: inset(0 0 100% 0);
+    translate: 0 100%;
+  }
+}
+
+/* Half a laptop screen: the measurements leave, and the pipeline takes a row of its own. */
+@container console (max-width: 1119px) {
+  .telemetry {
+    display: none;
+  }
+
+  .module__signal {
+    flex-basis: 100%;
+    max-width: 340px;
+  }
+}
+
+/* A phone: each side is a narrow column. The key says a word or two on one line (your side
+   names its microphone, so the two keys never read alike), and the pipeline names only the
+   step at work (the others keep their marks). */
+@container console (max-width: 679px) {
+  .module__title {
+    font-size: clamp(17px, 5.2vw, 24px);
+    white-space: normal;
+  }
+
+  .module__meta {
+    flex-wrap: wrap;
+    gap: 4px 8px;
+  }
+
+  .module__keys {
+    width: 100%;
+  }
+
+  .key {
+    flex: 1;
+    gap: 7px;
+    width: auto;
+    min-width: 0;
+    padding-inline: 6px;
+    font-size: 10px;
+    letter-spacing: 0.07em;
+  }
+
+  .key__full {
+    display: none;
+  }
+
+  .key__short {
+    display: inline;
+  }
+
+  .pipeline__stage {
+    gap: 0;
+    font-size: 0;
+    letter-spacing: 0;
+  }
+
+  .pipeline__stage.is-active,
+  .pipeline__stage.is-waiting {
+    gap: 6px;
+    font-size: 9px;
+    letter-spacing: 0.1em;
+  }
+}
+
+/* The sheet with a channel's devices and voice. */
+.sheet-monitor {
+  --channel: var(--you);
+
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.sheet-monitor--incoming {
+  --channel: var(--them);
+}
+
+.sheet-monitor .meter {
+  grid-area: auto;
+}
+
+.sheet-monitor .status {
+  white-space: normal;
 }
 
 .controls {
   display: grid;
-  gap: 10px;
+  gap: 16px;
 }
 
 .advanced {
-  border-top: 1px solid var(--border);
-  padding-top: 8px;
+  border-top: 1px solid var(--hair);
+  padding-top: 12px;
 }
 
 .advanced > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
   color: var(--text-muted);
   cursor: pointer;
-  font-size: 13px;
-  font-weight: 600;
+  font: 560 10px / 1.4 var(--font-display);
+  font-stretch: 135%;
+  letter-spacing: 0.16em;
+  list-style: none;
+  text-transform: uppercase;
+}
+
+.advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+.advanced > summary::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  rotate: -45deg;
+  transition: rotate 0.3s var(--ease-out);
+}
+
+.advanced[open] > summary::before {
+  rotate: 45deg;
+}
+
+.advanced > summary:hover {
+  color: var(--text);
 }
 
 .advanced__body {
   display: grid;
-  gap: 12px;
-  padding-top: 10px;
+  gap: 16px;
+  padding-top: 14px;
+  animation: rise-in 0.36s var(--ease-out) backwards;
 }
 
-/* ------------------------------------------------------------------ transcript */
+/* ------------------------------------------------------------------ conversation */
 
 .toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 8px 18px;
-  border-bottom: 1px solid var(--border);
+  gap: 4px 12px;
+  min-height: 48px;
+  padding: 6px 12px 6px var(--page-x);
+  border-bottom: 1px solid var(--hair);
 }
 
 .toolbar__title {
-  color: var(--text-muted);
-  font-size: 12.5px;
-  font-weight: 650;
-  letter-spacing: 0.04em;
+  font: 520 11.5px / 1.1 var(--font-display);
+  font-stretch: 140%;
+  letter-spacing: 0.22em;
   text-transform: uppercase;
 }
 
@@ -463,9 +1217,14 @@
   display: flex;
   align-items: center;
   gap: 2px;
+  margin-inline-start: auto;
 }
 
 .transcript {
+  --gutter: 92px;
+  --column-gap: 32px;
+  --pad-x: var(--page-x);
+
   position: relative;
   min-height: 0;
 }
@@ -475,58 +1234,235 @@
      outside the scroller and makes the whole page scroll. */
   position: relative;
   height: 100%;
-  overflow-y: auto;
-  padding: 18px;
+  /* Sideways nothing scrolls (long words wrap); the full-width bands are clipped at the edge. */
+  overflow: hidden auto;
+  overscroll-behavior: contain;
+  padding: 0 var(--pad-x) 28px;
+}
+
+/* The scroller's content, measured by the smooth scrolling. A column, so that the drawing of
+   an empty page can fill the height it has. */
+.transcript__content {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.transcript__content > .transcript__list {
+  width: 100%;
+}
+
+/* A conversation takes the whole height of the page even when it is a sentence long, so that
+   the rules between the columns run to the bottom as they do on an empty page. */
+.transcript__content > .transcript__list:not(:empty) {
+  flex: 1 0 auto;
+  align-content: start;
+}
+
+.lenis.lenis-smooth {
+  scroll-behavior: auto !important;
+}
+
+.lenis.lenis-stopped {
+  overflow: clip;
 }
 
 .transcript__list {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 12px;
-  max-width: 980px;
+  max-width: 800px;
   margin: 0 auto;
-  padding: 0;
+  padding: 6px 0 0;
   list-style: none;
+}
+
+/* An empty page ends where its drawing ends: there is nothing under it to scroll to. */
+.transcript__list:empty {
+  padding: 0;
+}
+
+.transcript__scroll:has(.interlude:not(.is-leaving)) {
+  padding-bottom: 0;
 }
 
 .entry {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: 5px;
   min-width: 0;
-  gap: 4px;
-  max-width: min(100%, 720px);
-  padding: 10px 14px 12px;
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--channel);
-  border-radius: var(--radius);
-  background: var(--surface);
+  padding: 18px 0 20px;
+  border-bottom: 1px solid var(--hair);
+  /* During a call a sentence only fades in where it lands: the rise of its translation
+     (RevealLines) is its one movement. */
+  animation: fade-in 0.7s var(--ease-out) backwards;
 }
 
-.entry--outgoing {
-  justify-self: end;
-  border-left: 1px solid var(--border);
-  border-right: 3px solid var(--channel);
+.entry:last-child {
+  border-bottom-color: transparent;
 }
 
-.entry--muted {
-  padding: 4px 12px;
-  border-style: dashed;
-  background: transparent;
-  color: var(--text-faint);
-  font-size: 12.5px;
+/* A sentence comes into focus rather than appearing. */
+@keyframes entry-in {
+  from {
+    opacity: 0;
+    filter: blur(6px);
+    translate: 0 14px;
+  }
+}
+
+/* When the page opens on a conversation already under way, its sentences arrive one after
+   another, the newest first. */
+.transcript__list.is-arriving .entry {
+  animation-name: entry-in;
+  animation-duration: var(--slow);
+  animation-delay: 1.9s;
+}
+
+/* The first sentence waits for the drawing of the empty page to step back (Interlude), so
+   the two are never on the page at once. */
+.transcript__list.is-handover .entry {
+  animation-delay: 0.3s;
+}
+
+.transcript__list.is-arriving .entry:nth-last-child(1) {
+  animation-delay: 1.2s;
+}
+
+.transcript__list.is-arriving .entry:nth-last-child(2) {
+  animation-delay: 1.34s;
+}
+
+.transcript__list.is-arriving .entry:nth-last-child(3) {
+  animation-delay: 1.48s;
+}
+
+.transcript__list.is-arriving .entry:nth-last-child(4) {
+  animation-delay: 1.62s;
+}
+
+.transcript__list.is-arriving .entry:nth-last-child(5) {
+  animation-delay: 1.76s;
+}
+
+/* Under a moving pointer one sentence stays lit and the words of the others step back, for
+   reading it alone. Only the words: who spoke and when are the faintest things on the page
+   already and keep their strength, as does the language tag inside a caption. The words step
+   back only as far as stays readable (4.5:1), and only while the pointer is in use: the
+   component clears `data-pointer` once it has rested, so a pointer parked on the conversation
+   never dims a call. */
+@media (hover: hover) {
+  .transcript__scroll[data-pointer] .transcript__list:has(.entry:hover) .entry:not(:hover) .entry__cell {
+    opacity: 0.78;
+  }
+
+  .transcript__scroll[data-pointer] .transcript__list:has(.entry:hover) .entry:not(:hover) .entry__lang {
+    color: var(--text-muted);
+  }
 }
 
 .entry__meta {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px 8px;
+  gap: 4px 10px;
+  min-height: 20px;
   color: var(--text-faint);
   font-size: 12px;
-  font-variant-numeric: tabular-nums;
+}
+
+/* Stacked, the speaker and the time stay at the top of the conversation, on the paper, for as
+   long as any of their sentence is in view: the top edge never shows an anonymous fragment. */
+/* The band runs the full width of the scroller, not just the reading column: Nastaliq strokes
+   overhang the column's edge and must slide under it too. */
+.transcript:not(.is-parallel) .entry__meta {
+  container-type: scroll-state;
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  margin-block: -10px -4px;
+  padding-block: 10px 4px;
+  background: var(--surface);
+}
+
+.transcript:not(.is-parallel) .entry__meta::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: 0 -100vmax;
+  background: var(--surface);
+}
+
+/* While the line is pinned, the text sliding under it fades out instead of showing cut
+   glyphs below its edge. Browsers without scroll-state queries simply show the edge. */
+.entry__edge {
+  display: none;
+}
+
+@container scroll-state(stuck: top) {
+  .entry__edge {
+    position: absolute;
+    top: 100%;
+    right: -100vmax;
+    left: -100vmax;
+    display: block;
+    /* A soft edge only. Following a call, the conversation rests on whole sentences
+       (Transcript), so this shows while scrolling, or under a sentence taller than the page. */
+    height: 14px;
+    background: linear-gradient(var(--surface) 4px, transparent);
+    pointer-events: none;
+  }
 }
 
 .entry__meta svg {
   flex: none;
+}
+
+.speaker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--channel);
+  font: 600 10.5px / 1.4 var(--font-display);
+  font-stretch: 135%;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.entry__when {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.entry__time {
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+}
+
+/* The sentence whose translation is being voiced right now. */
+.entry__speaking {
+  color: var(--channel);
+  animation: blink 1.4s ease-in-out infinite;
+}
+
+/* The other captions and the delay arrive with the translation, quietly, beside its rise. */
+.entry__extra,
+.entry__latency {
+  animation: fade-in 0.9s var(--ease-out) 0.15s backwards;
+}
+
+.entry__latency {
+  margin-inline-start: auto;
+  font: 10.5px var(--font-mono);
+  font-variant-numeric: tabular-nums slashed-zero;
+  letter-spacing: 0.02em;
+}
+
+.entry__latency.is-slow {
+  color: var(--warn);
+  font-weight: 650;
 }
 
 .entry__source,
@@ -536,125 +1472,867 @@
 .entry__note {
   /* URLs, e-mail addresses and German compounds must wrap instead of widening the page. */
   overflow-wrap: anywhere;
+  text-wrap: pretty;
 }
 
 .entry__source {
   color: var(--text-muted);
-  font-size: calc(14px * var(--caption-scale));
+  font-size: calc(15px * var(--caption-scale));
+  line-height: 1.5;
 }
 
 .entry__target {
-  font-size: calc(20px * var(--caption-scale));
-  font-weight: 550;
-  line-height: 1.35;
+  position: relative;
+  font-size: calc(21px * var(--caption-scale));
+  font-weight: 520;
+  line-height: 1.38;
+  letter-spacing: -0.006em;
+}
+
+/* When a translation lands, a line in the voice's colour draws across it once and fades:
+   the signal arriving. */
+.entry__target::before {
+  content: '';
+  position: absolute;
+  top: -9px;
+  right: 0;
+  left: 0;
+  height: 1px;
+  background: var(--channel);
+  opacity: 0;
+  transform-origin: left center;
+  animation: signal 1.9s var(--ease-out) backwards;
+  pointer-events: none;
+}
+
+.entry__target[dir='rtl']::before {
+  transform-origin: right center;
+}
+
+@keyframes signal {
+  from {
+    opacity: 0.9;
+    scale: 0 1;
+  }
+
+  55% {
+    opacity: 0.9;
+    scale: 1 1;
+  }
+
+  to {
+    opacity: 0;
+    scale: 1 1;
+  }
+}
+
+/* The lines of a translation, each in its mask, while they rise; the words inside stay inline.
+   The split is undone once they are in place. */
+.reveal-line-mask,
+.reveal-line {
+  display: block;
+}
+
+/* Nastaliq reaches well above and below its line. Its masks are opened by as much, so that
+   no stroke is cut while a line rises and nothing changes when the split is undone; its
+   lines start further down to be out of sight there too (RevealLines). */
+.script-arab .reveal-line-mask {
+  overflow-clip-margin: 0.55em;
+}
+
+.entry__source.script-arab,
+.entry__extra.script-arab {
+  font-size: calc(16px * var(--caption-scale));
+  line-height: 2.05;
 }
 
 .entry__target.script-arab {
-  font-size: calc(22px * var(--caption-scale));
+  font-size: calc(23px * var(--caption-scale));
   font-weight: 500;
-  line-height: 2.15;
+  letter-spacing: 0;
+  line-height: 2.1;
 }
 
-:root[data-urdu-font='naskh'] .entry__target.script-arab {
+:root[data-urdu-font='naskh'] .entry__target.script-arab,
+:root[data-urdu-font='naskh'] .entry__source.script-arab {
   line-height: 1.75;
 }
 
 .entry__extra {
   color: var(--text-muted);
-  font-size: calc(14px * var(--caption-scale));
+  font-size: calc(14.5px * var(--caption-scale));
+  line-height: 1.5;
 }
 
 .entry__lang {
-  margin-inline-end: 6px;
+  margin-inline-end: 8px;
   color: var(--text-faint);
-  font: 600 10.5px var(--font-ui);
-  letter-spacing: 0.05em;
+  font: 560 10px var(--font-display);
+  font-stretch: 135%;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   unicode-bidi: isolate;
 }
 
 .entry__error {
   color: var(--danger);
-  font-size: 13px;
+  font-size: 13.5px;
 }
 
 .entry__note {
   color: var(--warn);
+  font-size: 13px;
+}
+
+/* A sentence that was heard but not interpreted: one quiet line. */
+.entry--muted {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: 12px;
+  padding: 9px 0;
+  animation-duration: 0.3s;
+}
+
+.entry--muted .speaker {
+  color: var(--text-faint);
+}
+
+.entry__dropped {
+  color: var(--text-faint);
   font-size: 12.5px;
 }
 
-.skeleton {
+/* Speech being recognised or translated: the line where the words will be set, with a light in
+   the voice's colour running along it, the same signal as on the console's pipeline. */
+.pending {
   display: inline-block;
-  width: 120px;
-  height: 10px;
-  border-radius: 999px;
-  background: var(--surface-3);
-  animation: pulse 1.2s ease-in-out infinite;
+  width: min(100%, 132px);
+  height: 1px;
+  margin-block: 0.7em;
+  background: linear-gradient(90deg, var(--hair-strong) 30%, var(--channel) 50%, var(--hair-strong) 70%) 100%
+    0 / 300% 100%;
+  vertical-align: middle;
+  animation: flow 1.6s linear infinite;
 }
 
-@keyframes pulse {
-  50% {
-    opacity: 0.45;
-  }
+[dir='rtl'] > .pending {
+  animation-direction: reverse;
 }
 
-.empty {
+/* Column heads of the side-by-side layout; hidden while the languages are stacked. */
+.transcript__heads {
+  display: none;
+}
+
+/*
+ * Side by side, like a bilingual edition: one column per language, in the same place for
+ * every sentence, whoever spoke it, with a hairline rule between the columns. Chosen by the
+ * component when every column has room.
+ */
+.transcript.is-parallel .transcript__list,
+.transcript__heads-row,
+.interlude.is-parallel {
+  --period: calc((100% - var(--gutter) - var(--cols) * var(--column-gap)) / var(--cols) + var(--column-gap));
+
+  max-width: 1600px;
+}
+
+.transcript.is-parallel .transcript__list,
+.transcript__heads-row {
+  background: repeating-linear-gradient(to right, var(--hair) 0 1px, transparent 1px var(--period))
+    calc(var(--gutter) + var(--column-gap) / 2) 0 / 100% 100% no-repeat;
+}
+
+/* Across the scroller's side padding too, so that nothing scrolling by shows beside it. */
+.transcript.is-parallel .transcript__heads {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  display: block;
+  margin: 0 calc(-1 * var(--pad-x));
+  padding: 0 var(--pad-x);
+  border-bottom: 1px solid var(--hair-strong);
+  background: var(--surface);
+}
+
+/* A soft edge under the heads for sentences scrolling past. Following a call, only the space
+   above a sentence is under it: the conversation rests on whole sentences (Transcript). */
+.transcript.is-parallel .transcript__heads::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  right: 0;
+  left: 0;
+  height: 14px;
+  margin-top: 1px;
+  background: linear-gradient(var(--surface) 3px, transparent);
+  pointer-events: none;
+}
+
+/* One baseline for the Latin names and the Nastaliq one. */
+.transcript__heads-row {
   display: grid;
-  gap: 14px;
-  max-width: 520px;
-  margin: 8dvh auto 0;
+  grid-template-columns: var(--gutter) repeat(var(--cols), minmax(0, 1fr));
+  align-items: baseline;
+  column-gap: var(--column-gap);
+  margin: 0 auto;
+  padding: 9px 0 6px;
+}
+
+.transcript__head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  cursor: default;
+}
+
+/* The Urdu column is set right to left; its head sits over its text. */
+.transcript__head:has(.script-arab) {
+  justify-content: flex-end;
+}
+
+.transcript__code {
+  color: var(--text-faint);
+  font: 520 10px / 1.6 var(--font-display);
+  font-stretch: 135%;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.transcript__name {
+  color: var(--text-muted);
+  font: 520 10.5px / 1.6 var(--font-display);
+  font-stretch: 135%;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  transition: color 0.5s var(--ease-out);
+}
+
+.transcript__head:hover .transcript__name {
+  color: var(--text);
+}
+
+/* Room for Nastaliq's tall strokes and deep descents inside the band. */
+.transcript__name.script-arab {
+  font-family: var(--font-urdu-nastaliq);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 2.1;
+}
+
+/* Pointing at a language's head reads that language alone: its column comes up to full
+   strength and the others step back, never further than stays readable. */
+.entry__cell {
+  transition:
+    opacity 0.6s var(--ease-out),
+    color 0.6s var(--ease-out);
+}
+
+.transcript__scroll[data-pointer]:has(.transcript__head[data-lang='de']:hover) .entry__cell:not([lang='de']),
+.transcript__scroll[data-pointer]:has(.transcript__head[data-lang='en']:hover) .entry__cell:not([lang='en']),
+.transcript__scroll[data-pointer]:has(.transcript__head[data-lang='ur']:hover) .entry__cell:not([lang='ur']) {
+  opacity: 0.78;
+}
+
+.transcript__scroll[data-pointer]:has(.transcript__head:hover) .entry__lang {
   color: var(--text-muted);
 }
 
-.empty h2 {
+.transcript__scroll[data-pointer]:has(.transcript__head[data-lang='de']:hover) .entry__cell[lang='de'],
+.transcript__scroll[data-pointer]:has(.transcript__head[data-lang='en']:hover) .entry__cell[lang='en'],
+.transcript__scroll[data-pointer]:has(.transcript__head[data-lang='ur']:hover) .entry__cell[lang='ur'] {
   color: var(--text);
-  font-size: 18px;
 }
 
-.empty ol {
-  display: grid;
-  gap: 8px;
-  margin: 0;
-  padding-left: 20px;
+.transcript.is-parallel .entry {
+  grid-template-columns: var(--gutter) repeat(var(--cols), minmax(0, 1fr));
+  gap: 6px var(--column-gap);
+  padding: 20px 0 22px;
+}
+
+.transcript.is-parallel .entry--muted {
+  padding: 9px 0;
+}
+
+/* The speaker and the time stay in the gutter, below the column heads, for as long as any of
+   their sentence is in view, so a sentence half scrolled away still says whose it is. */
+.transcript.is-parallel .entry__meta {
+  position: sticky;
+  top: 56px;
+  flex-direction: column;
+  align-self: start;
+  align-items: flex-start;
+  gap: 3px;
+  grid-column: 1;
+  grid-row: 1;
+  padding-top: 3px;
+}
+
+.transcript.is-parallel .entry__latency {
+  margin-inline-start: 0;
+}
+
+.transcript.is-parallel .entry__cell {
+  grid-column: var(--col, 2) / span 1;
+  grid-row: 1;
+}
+
+.transcript.is-parallel .entry__wide {
+  grid-column: 2 / -1;
+  grid-row: auto;
+}
+
+/* A line across all the columns breaks their rules, as a headline set across the columns of a
+   newspaper does: a rule must never strike through text. */
+.transcript.is-parallel .entry__wide,
+.transcript.is-parallel .entry__dropped {
+  margin-block: -3px;
+  padding-block: 3px;
+  background: var(--surface);
+}
+
+.transcript.is-parallel .entry__lang {
+  display: none;
+}
+
+.transcript.is-parallel .entry__dropped {
+  grid-column: 2 / -1;
+  align-self: center;
 }
 
 .jump {
   position: absolute;
-  bottom: 12px;
+  bottom: 14px;
   left: 50%;
-  transform: translateX(-50%);
+  translate: -50% 0;
   box-shadow: var(--shadow-pop);
+  animation: jump-in 0.36s var(--ease-out) backwards;
+}
+
+@keyframes jump-in {
+  from {
+    opacity: 0;
+    translate: -50% 10px;
+  }
+}
+
+/* ------------------------------------------------------------------ the empty page */
+
+/*
+ * Before anything is said, the conversation's own grid is drafted in: its column rules, the
+ * name in both scripts, and the steps to begin. Hidden while the drawing waits for the
+ * Nastaliq face, so it never shows a frame in the fallback font.
+ */
+/* The spaces follow the height of the window, so that on a laptop the whole page (both
+   names, the meaning and the three steps) is there without scrolling. */
+.interlude {
+  position: relative;
+  display: grid;
+  flex: 1 0 auto;
+  align-content: start;
+  gap: clamp(10px, 2.1vh, 34px);
+  width: 100%;
+  max-width: 800px;
+  margin: 0 auto;
+  padding: clamp(8px, 1.9vh, 34px) 0 12px;
+}
+
+.interlude[data-drafting] > * {
+  visibility: hidden;
+}
+
+/* Leaving: lifted out of the flow so the first sentence takes its place at once. */
+.interlude.is-leaving {
+  position: absolute;
+  z-index: 1;
+  inset: 0 0 auto;
+  pointer-events: none;
+}
+
+.interlude__rules {
+  display: none;
+}
+
+.interlude.is-parallel .interlude__rules {
+  position: absolute;
+  inset: 0;
+  display: block;
+  pointer-events: none;
+}
+
+.interlude__rule {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--gutter) + var(--column-gap) / 2 + (var(--at) - 2) * var(--period));
+  width: 1px;
+  background: var(--hair-strong);
+}
+
+.interlude.is-parallel .interlude__heads,
+.interlude.is-parallel .interlude__stage {
+  display: grid;
+  grid-template-columns: var(--gutter) repeat(var(--cols), minmax(0, 1fr));
+  column-gap: var(--column-gap);
+}
+
+.interlude__heads {
+  align-items: baseline;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--hair-strong);
+}
+
+.interlude__head {
+  display: flex;
+  grid-column: var(--at);
+  align-items: baseline;
+  gap: 10px;
+  color: var(--text-muted);
+  font: 520 10.5px / 1.6 var(--font-display);
+  font-stretch: 135%;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.interlude__head:has(.script-arab) {
+  justify-content: flex-end;
+}
+
+.interlude__head .script-arab {
+  font-size: 14px;
+  letter-spacing: 0;
+  line-height: 2.1;
+}
+
+.interlude__code {
+  color: var(--text-faint);
+  font: 520 10px / 1.6 var(--font-display);
+  font-stretch: 135%;
+  letter-spacing: 0.08em;
+}
+
+/* Stacked (a narrow window): the name in both scripts shares the first row, the Latin on the
+   left and the Nastaliq on the right, so the meaning and the first step fit above the fold. */
+.interlude__stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px 16px;
+  align-items: end;
+}
+
+.interlude:not(.is-parallel) .interlude__latin {
+  grid-column: 1;
+  grid-row: 1;
+  font-size: clamp(20px, 5.6vw, 38px);
+}
+
+.interlude:not(.is-parallel) .interlude__ur {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.interlude:not(.is-parallel) .interlude__ur svg {
+  width: clamp(96px, 30vw, 176px);
+  height: auto;
+}
+
+/* The copy runs the width of the column: on anything wider than a phone each step is one
+   line, which is what lets the page fit without scrolling. */
+.interlude:not(.is-parallel) .interlude__copy {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  max-width: none;
+}
+
+.interlude:not(.is-parallel) .interlude__gloss {
+  max-width: 72ch;
+}
+
+/*
+ * Side by side, the title page is set on the conversation's own columns:
+ *
+ *   the name in Latin      its meaning      the name in Nastaliq
+ *   the state of the page
+ *   step 01                step 02          step 03
+ *   how to use it in a call                 the other way to say something
+ *
+ * The copy is not a block of its own here; its parts are placed on the page one by one.
+ */
+.interlude.is-parallel .interlude__stage {
+  row-gap: clamp(10px, 1.8vh, 24px);
+  align-items: start;
+}
+
+.interlude.is-parallel :is(.interlude__copy, .interlude__foot) {
+  display: contents;
+}
+
+.interlude.is-parallel .interlude__latin {
+  grid-column: var(--latin-at);
+  grid-row: 1;
+  align-self: first baseline;
+}
+
+.interlude.is-parallel .interlude__title {
+  grid-column: var(--latin-at);
+  grid-row: 2;
+}
+
+.interlude.is-parallel .interlude__ur {
+  grid-column: var(--urdu-at);
+  grid-row: 1 / span 2;
+}
+
+/* On the baseline of the name beside it. */
+.interlude.is-parallel .interlude__gloss {
+  grid-column: var(--gloss-at);
+  grid-row: 1 / span 2;
+  align-self: first baseline;
+  max-width: 40ch;
+}
+
+.interlude.is-parallel .interlude__steps {
+  grid-column: 2 / -1;
+  grid-row: 3;
+  grid-template-columns: subgrid;
+  gap: 12px var(--column-gap);
+  padding-top: clamp(0px, 1vh, 10px);
+}
+
+.interlude.is-parallel .interlude__more {
+  grid-column: 2 / -2;
+  grid-row: 4;
+}
+
+.interlude.is-parallel .interlude__aside {
+  grid-column: -2 / -1;
+  grid-row: 4;
+  align-self: center;
+  justify-self: end;
+  text-align: end;
+}
+
+/* Two languages, two columns: the meaning goes under the state of the page. */
+.interlude.is-parallel .interlude__copy.is-under .interlude__gloss {
+  grid-row: 3;
+  align-self: start;
+}
+
+.interlude.is-parallel .interlude__copy.is-under .interlude__steps {
+  grid-row: 4;
+}
+
+.interlude.is-parallel .interlude__copy.is-under :is(.interlude__more, .interlude__aside) {
+  grid-row: 5;
+}
+
+/* The name in Nastaliq: an outline drawn as the pen would, then inked from right to left. */
+.interlude__ur {
+  display: grid;
+  justify-items: end;
+}
+
+.interlude__ur svg {
+  grid-area: 1 / 1;
+  width: auto;
+  max-width: 100%;
+  height: clamp(84px, 13vh, 150px);
+  overflow: visible;
+}
+
+/* A hairline at any size; the dashes it is drawn with are set by the component. */
+.interlude__ur-outline text {
+  fill: none;
+  stroke: var(--text);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.interlude__ur-outline {
+  opacity: 0.3;
+}
+
+.interlude__ur-ink {
+  --wipe: 1;
+
+  mask-image: linear-gradient(
+    to left,
+    #000 calc(var(--wipe) * 130% - 30%),
+    transparent calc(var(--wipe) * 130%)
+  );
+}
+
+.interlude__ur-ink text {
+  fill: var(--text);
+}
+
+/* The name in Latin, in the instrument's lettering: it opens out from a narrow, heavy block
+   into wide, light capitals. */
+.interlude__latin {
+  padding-top: 0.2em;
+  font-family: var(--font-display);
+  font-size: clamp(24px, 2.9vw, 46px);
+  font-variation-settings:
+    'wdth' var(--wdth, 151),
+    'wght' var(--wght, 250);
+  letter-spacing: 0.05em;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.interlude__copy {
+  display: grid;
+  gap: 14px;
+  max-width: 46ch;
+  color: var(--text-muted);
+}
+
+.interlude__gloss {
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.interlude__gloss [lang='ur-Latn'] {
+  color: var(--text);
+  font-family: var(--font-display);
+  font-style: oblique 10deg;
+  font-weight: 500;
+}
+
+.interlude__title {
+  color: var(--text);
+  font: 330 clamp(20px, 1.8vw, 26px) / 1.15 var(--font-display);
+  font-stretch: 122%;
+  letter-spacing: -0.005em;
+}
+
+.interlude__steps {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  counter-reset: step;
+  list-style: none;
+}
+
+/* Numbered, because the order matters: the key comes before the microphone. */
+.interlude__steps li {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  counter-increment: step;
+}
+
+.interlude__steps li::before {
+  content: counter(step, decimal-leading-zero);
+  padding-top: 3px;
+  color: var(--text-faint);
+  font: 520 10px / 1.6 var(--font-display);
+  font-stretch: 135%;
+}
+
+.interlude__steps strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* The two closing lines share a row where there is room for both. */
+.interlude__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 24px;
+}
+
+.interlude__more {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.interlude__aside {
+  color: var(--text-faint);
+  font-size: 12.5px;
 }
 
 /* ------------------------------------------------------------------ composer */
 
 .composer {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: end;
-  gap: 8px;
-  padding: 10px 18px 14px;
-  border-top: 1px solid var(--border);
-  background: var(--surface);
+  container: composer / inline-size;
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 10px 12px 12px var(--page-x);
+  border-top: 1px solid var(--hair-strong);
+  background: var(--bg);
+}
+
+.composer .segmented {
+  flex: none;
 }
 
 .composer .segmented__options {
-  min-width: 170px;
+  min-height: 42px;
+  align-items: stretch;
+}
+
+.composer .segmented__option > span {
+  white-space: nowrap;
+}
+
+/* The chosen voice is filled with its colour, like the key of its unit. */
+.composer .segmented__option:has(.who--outgoing) input:checked + span {
+  background: var(--you-field);
+  color: var(--on-channel);
+}
+
+.composer .segmented__option:has(.who--incoming) input:checked + span {
+  background: var(--them-field);
+  color: var(--on-channel);
+}
+
+.who {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.who::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+  background: var(--channel);
+  rotate: 45deg;
+}
+
+.segmented__option input:checked + span .who::before {
+  background: currentColor;
+}
+
+.composer__field {
+  display: flex;
+  flex: 1;
+  align-items: flex-end;
+  gap: 6px;
+  min-width: 0;
+  padding: 3px 3px 3px 12px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  transition:
+    border-color 0.5s var(--ease-out),
+    box-shadow 0.5s var(--ease-out);
+}
+
+.composer__field:hover {
+  border-color: var(--text-muted);
+}
+
+.composer__field:focus-within {
+  border-color: var(--channel);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--channel) 18%, transparent);
 }
 
 .composer textarea {
-  min-height: 38px;
+  flex: 1;
+  min-width: 0;
+  min-height: 34px;
   max-height: 140px;
+  padding: 6px 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  caret-color: var(--channel);
   resize: none;
+  /* Grows with the text, up to the max-height. */
+  field-sizing: content;
 }
 
-@media (max-width: 640px) {
-  .composer {
-    grid-template-columns: minmax(0, 1fr) auto;
+/* One line, however narrow the box: a hint that wraps makes the box taller, and that height
+   comes out of the conversation. Where it does not fit it fades out before the button. */
+.composer textarea::placeholder {
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.composer textarea:placeholder-shown {
+  mask-image: linear-gradient(to right, #000 calc(100% - 44px), transparent calc(100% - 6px));
+}
+
+.composer textarea:disabled {
+  cursor: not-allowed;
+}
+
+.composer__send {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 34px;
+  min-height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--channel);
+  border-radius: 1px;
+  /* Like the keys of the console: an outline that fills with the voice's colour. */
+  background: linear-gradient(var(--field), var(--field)) no-repeat left / 0% 100%;
+  color: var(--channel);
+  cursor: pointer;
+  font: 560 10.5px / 1 var(--font-display);
+  font-stretch: 132%;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  transition:
+    background-size 0.6s var(--ease-out),
+    color 0.35s var(--ease-out) 0.05s,
+    border-color 0.5s var(--ease-out),
+    opacity 0.5s var(--ease-out),
+    scale 0.12s;
+}
+
+.composer__send:hover:not(:disabled) {
+  background-size: 100% 100%;
+  color: var(--on-channel);
+}
+
+.composer__send svg {
+  transition: translate 0.6s var(--ease-out);
+}
+
+.composer__send:hover:not(:disabled) svg {
+  translate: 3px 0;
+}
+
+.composer__send:active:not(:disabled) {
+  scale: 0.96;
+}
+
+.composer__send:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+@container composer (max-width: 560px) {
+  .composer__send {
+    padding: 0;
   }
 
-  .composer .segmented {
-    grid-column: 1 / -1;
+  .composer__send-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .composer .segmented__option > span {
+    padding: 3px 8px;
   }
 }
 
@@ -663,30 +2341,59 @@
 .tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 2px;
-  margin: -6px 0 16px;
-  border-bottom: 1px solid var(--border);
+  gap: 4px;
+  margin: -6px 0 20px;
+  border-bottom: 1px solid var(--hair);
 }
 
 .tab {
+  position: relative;
   margin-bottom: -1px;
-  padding: 8px 12px;
+  padding: 12px 12px 13px;
   border: 0;
-  border-bottom: 2px solid transparent;
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  font-weight: 600;
+  font: 560 10.5px / 1.3 var(--font-display);
+  font-stretch: 135%;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  transition: color 0.3s var(--ease-out);
+}
+
+/* The chosen tab's rule is drawn over the hairline under the row, from the left. */
+.tab::after {
+  content: '';
+  position: absolute;
+  right: 12px;
+  bottom: 0;
+  left: 12px;
+  height: 1px;
+  background: var(--text);
+  scale: 0 1;
+  transform-origin: left center;
+  transition: scale 0.5s var(--ease-out);
+}
+
+.tab:hover {
+  color: var(--text);
 }
 
 .tab[aria-selected='true'] {
-  border-bottom-color: var(--accent);
   color: var(--text);
+}
+
+.tab[aria-selected='true']::after {
+  scale: 1 1;
+}
+
+[role='tabpanel'] {
+  animation: fade-in 0.24s var(--ease-out) backwards;
 }
 
 .stack {
   display: grid;
-  gap: 16px;
+  gap: 18px;
 }
 
 .stack--tight {
@@ -705,18 +2412,21 @@
   min-width: 160px;
 }
 
-.section-title {
-  font-size: 13.5px;
-  font-weight: 650;
+/* Headings inside a dialog: the dialog title's lettering, a size down. */
+.section-title,
+.card__title,
+.step__title {
+  font: 430 15.5px / 1.3 var(--font-display);
+  font-stretch: 120%;
+  letter-spacing: 0.01em;
 }
 
+/* One service among several: set off by a rule above it, not put in a box of its own. */
 .card {
   display: grid;
-  gap: 8px;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
+  gap: 10px;
+  padding: 18px 0 4px;
+  border-top: 1px solid var(--hair-strong);
 }
 
 .card__head {
@@ -724,10 +2434,6 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 6px 8px;
-}
-
-.card__title {
-  font-weight: 650;
 }
 
 .card__spacer {
@@ -750,20 +2456,26 @@
 
 .table th,
 .table td {
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--border);
+  padding: 8px 8px;
+  border-bottom: 1px solid var(--hair);
   text-align: left;
   vertical-align: top;
 }
 
 .table th {
-  color: var(--text-muted);
-  font-size: 12px;
-  font-weight: 650;
+  color: var(--text-faint);
+  font: 560 10.5px var(--font-display);
+  font-stretch: 135%;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .table td:last-child {
   overflow-wrap: anywhere;
+}
+
+.table td svg {
+  vertical-align: -2px;
 }
 
 .outcome--ok {
@@ -792,14 +2504,21 @@
 .checks {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px 16px;
+  gap: 8px 18px;
 }
 
 .check {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   cursor: pointer;
+}
+
+.check input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
 }
 
 .font-preview {
@@ -820,21 +2539,25 @@
 
 .steps {
   display: grid;
-  gap: 14px;
+  gap: 0;
   margin: 0;
   padding: 0;
   list-style: none;
   counter-reset: step;
 }
 
+/* Numbered stations joined by a thread, ticked off as the live checks pass. */
 .step {
+  position: relative;
   display: grid;
-  grid-template-columns: 30px minmax(0, 1fr);
-  gap: 4px 12px;
-  padding: 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 4px 16px;
+  padding: 0 0 26px;
   counter-increment: step;
+}
+
+.step:last-child {
+  padding-bottom: 4px;
 }
 
 .step::before {
@@ -843,45 +2566,74 @@
   place-items: center;
   width: 28px;
   height: 28px;
+  border: 1px solid var(--border-strong);
   border-radius: 50%;
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-weight: 700;
+  background: var(--surface);
+  color: var(--text-muted);
+  font: 560 12px var(--font-display);
 }
 
+.step:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  top: 32px;
+  bottom: 4px;
+  left: 13.5px;
+  width: 1px;
+  background: var(--border-strong);
+}
+
+/* Done: the ring and a tick, both drawn in the state's colour through a mask (a picture of a
+   tick could not follow the theme), with nothing filled in. */
 .step.is-done::before {
-  background: var(--ok-soft);
-  color: var(--ok);
+  content: '';
+  border: 0;
+  background: var(--ok);
+  mask:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M19 7 9.5 16.5 5 12'/%3E%3C/svg%3E")
+      center / 14px 14px no-repeat,
+    radial-gradient(circle closest-side, transparent calc(100% - 1.5px), #000 calc(100% - 0.75px));
+}
+
+.step.is-done:not(:last-child)::after {
+  background: color-mix(in oklab, var(--ok) 55%, var(--border-strong));
 }
 
 .step__body {
   display: grid;
-  gap: 8px;
+  gap: 9px;
+  padding-top: 3px;
 }
 
 .step__title {
-  font-size: 15px;
-  font-weight: 650;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
 }
 
 .step__body ul {
   display: grid;
-  gap: 4px;
+  gap: 6px;
   margin: 0;
   padding-left: 18px;
+}
+
+.step__body li::marker {
+  color: var(--text-faint);
 }
 
 .step__actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 8px 12px;
 }
 
 .kbd {
-  padding: 0 5px;
-  border: 1px solid var(--control-border);
-  border-radius: 4px;
+  padding: 1px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-s);
   background: var(--surface-2);
   font: 12px var(--font-mono);
   white-space: nowrap;
@@ -904,23 +2656,48 @@
 }
 
 /*
- * Over the top corner of the conversation: below the toolbar, clear of both channel panels
- * and the composer at every window size. Only the messages themselves take clicks.
+ * A strip under the conversation's title, in the flow: a message never covers a caption,
+ * at any window size. The conversation gives up the height and keeps its newest sentence
+ * in view (Transcript pins it when its scroller shrinks).
  */
 .toasts--page {
-  position: absolute;
-  z-index: 50;
-  top: 44px;
-  right: 12px;
+  grid-row: 2;
   align-content: start;
-  width: min(420px, calc(100% - 24px));
-  max-height: calc(100% - 56px);
+  max-height: 40dvh;
   overflow-y: auto;
-  pointer-events: none;
+}
+
+/* Full width, one line per message, hairlines between them: a band, never a box in a band. */
+.toasts--page.has-toasts {
+  padding: 0 12px 0 var(--page-x);
+  border-bottom: 1px solid var(--hair);
+  background: var(--bg);
+}
+
+.toasts--page .toasts__group:not(:empty) + .toasts__group:not(:empty) {
+  margin-top: 0;
+  border-top: 1px solid var(--hair);
+}
+
+.toasts--page .toasts__group {
+  gap: 0;
 }
 
 .toasts--page .toast {
-  pointer-events: auto;
+  align-items: center;
+  padding: 6px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.toasts--page .toast + .toast {
+  border-top: 1px solid var(--hair);
+}
+
+.toasts--page .toast > svg {
+  margin-top: 0;
 }
 
 /* The page copy keeps its place behind an open dialog but must not show a second time. */
@@ -934,145 +2711,201 @@
 }
 
 .toasts--dialog.has-toasts {
-  padding: 10px 20px 0;
+  padding: 12px 22px 0;
 }
 
 .toast {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: start;
-  gap: 8px;
-  padding: 10px 8px 10px 12px;
-  border: 1px solid var(--border);
-  border-left: 4px solid var(--text-faint);
-  border-radius: var(--radius-s);
+  gap: 10px;
+  padding: 10px 6px 10px 13px;
+  border: 1px solid var(--hair-strong);
+  border-radius: var(--radius-l);
   background: var(--surface);
   box-shadow: var(--shadow-pop);
+  font-size: 13.5px;
+  animation: toast-in 0.3s var(--ease-out) backwards;
 }
 
-.toast svg {
+.toasts--dialog .toast {
+  box-shadow: none;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    translate: 10px 0;
+  }
+}
+
+.toast > svg {
   margin-top: 2px;
+  color: var(--text-faint);
 }
 
-.toast--success {
-  border-left-color: var(--ok);
+.toast--success > svg {
+  color: var(--ok);
 }
 
-.toast--warning {
-  border-left-color: var(--warn);
+.toast--warning > svg {
+  color: var(--warn);
 }
 
 .toast--error {
-  border-left-color: var(--danger);
+  border-color: color-mix(in oklab, var(--danger) 35%, var(--border));
+}
+
+.toast--error > svg {
+  color: var(--danger);
 }
 
 .toast__text {
+  padding-top: 1px;
   overflow-wrap: anywhere;
+}
+
+.toast .icon-button {
+  width: 26px;
+  height: 26px;
 }
 
 /* ------------------------------------------------------------------ responsive */
 
-/*
- * Narrow window (the usual case: beside the Teams call). The page itself never scrolls:
- * the two channel panels sit side by side in a strip of limited height above the
- * conversation, which takes the rest and scrolls inside itself.
- */
-@media (max-width: 980px) {
-  .topbar {
-    gap: 6px 14px;
-    padding: 8px 12px;
-  }
-
-  .workspace {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto minmax(0, 1fr);
-  }
-
-  .sidebar {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    align-items: start;
-    gap: 8px;
-    max-height: 40dvh;
-    padding: 8px 12px;
-    border-right: 0;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .chips {
-    justify-content: flex-start;
-  }
-
-  /* Left-aligned chips: open the list from the left edge, JS keeps it inside the window. */
-  .popover {
-    right: auto;
-    left: 0;
-  }
-
-  .banner {
-    padding: 6px 12px;
-  }
-
-  .chip {
-    max-width: none;
-  }
-
-  .capture {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .capture__button {
-    min-width: 0;
-    width: 100%;
-  }
-
-  .toolbar {
-    padding: 4px 12px;
-  }
-
-  .transcript__scroll {
-    padding: 12px;
-  }
-
-  .composer {
-    padding: 8px 12px 10px;
-  }
-}
-
-/*
- * Compact panels, for a narrow or a short window: the devices and voice options are folded
- * away so that Start/Stop, the status line and the level meter of both channels stay in view.
- */
-@media (max-width: 980px), (max-height: 720px) {
-  .panel {
-    gap: 8px;
-    padding: 10px;
-  }
-
-  .panel__head {
-    flex-wrap: wrap;
-  }
-
-  .panel__toggle {
-    display: inline-flex;
-    justify-self: start;
-  }
-
-  .panel:not(.is-expanded) .panel__body {
-    display: none;
-  }
-
-  .panel.is-expanded .panel__toggle svg {
-    transform: rotate(180deg);
-  }
-}
-
-/* Three provider chips plus the two buttons would take four rows: keep the state dot and name, the list has the rest. */
-@media (max-width: 560px) {
-  .chip__value {
+/* The names of healthy services give way first (a step with a problem keeps its name), then
+   the button labels. */
+@media (max-width: 1180px) {
+  .service--ok .service__label,
+  .service--unknown .service__label {
     position: absolute;
     width: 1px;
     height: 1px;
     overflow: hidden;
     clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .services__button {
+    gap: 8px;
+  }
+}
+
+@media (max-width: 860px) {
+  .app {
+    --page-x: 14px;
+  }
+
+  .topbar {
+    gap: 6px 12px;
+    padding: 7px 8px 7px var(--page-x);
+  }
+
+  .topbar__actions .button {
+    width: 34px;
+    padding: 0;
+  }
+
+  .button__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  /* The console's own gaps (a container cannot be restyled by its own container query): the
+     closed middle column leaves two gaps between the sides, so each is halved. */
+  .console {
+    column-gap: 8px;
+    padding-top: 14px;
+    padding-bottom: 14px;
+  }
+
+  .toolbar {
+    padding-right: 6px;
+  }
+
+  .transcript__scroll {
+    padding-bottom: 18px;
+  }
+
+  .composer {
+    padding: 8px 10px 10px var(--page-x);
+  }
+}
+
+/* The mark alone carries the brand; the name stays in the heading for screen readers. */
+@media (max-width: 560px) {
+  .brand__name {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .pair {
+    padding-left: 12px;
+  }
+
+  .services__button {
+    padding: 4px 10px;
+  }
+}
+
+/* On a phone the masthead keeps one row: the connection shows as its dot alone, and its
+   words stay for screen readers. */
+@media (max-width: 480px) {
+  .connection__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .topbar {
+    gap: 6px 10px;
+  }
+}
+
+/* A low window: the surface gives up height so the conversation keeps its room. */
+/* A window too low to draw the surface in (it needs some 70px between the two sides' heads
+   and their keys): the console closes up without it and the height goes to the conversation. */
+@media (max-height: 700px) {
+  .console {
+    grid-template-rows: auto 14px auto auto;
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+
+  .console__field {
+    display: none;
+  }
+}
+
+/* A window too low for the console and the conversation together (a phone held sideways):
+   the page scrolls as a whole, and the conversation keeps a height it can be read in. */
+@media (max-height: 520px) {
+  .app {
+    height: auto;
+    min-height: 100dvh;
+  }
+
+  .reading {
+    height: max(340px, 88dvh);
+  }
+}
+
+@media (max-height: 640px) {
+  .module__title {
+    font-size: clamp(20px, 2.2vw, 30px);
+  }
+
+  .entry {
+    padding: 12px 0 14px;
   }
 }

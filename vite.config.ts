@@ -46,6 +46,9 @@ export default defineConfig({
     emptyOutDir: true,
     sourcemap: true,
     target: 'es2022',
+    // Fonts always ship as files: the server's Content-Security-Policy allows fonts only from
+    // 'self', and a small subset would otherwise be inlined as a blocked data: URL.
+    assetsInlineLimit: (file) => (file.endsWith('.woff2') || file.endsWith('.woff') ? false : undefined),
   },
   server: {
     port: 5173,
