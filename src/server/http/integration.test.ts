@@ -10,7 +10,12 @@ import WebSocket from 'ws';
 
 import { tonePcm, waitFor } from '../../../tests/unit/helpers';
 import { currentUserSid, entriesBeyondOwner, windowsAcl } from '../../../tests/unit/helpers/windowsAcl';
-import type { DiagnosticsReport, KeysResponse } from '../../shared/api';
+import {
+  SPEECH_CHECK_SENTENCES,
+  type DiagnosticsReport,
+  type KeysResponse,
+  type SpeechCheckReport,
+} from '../../shared/api';
 import {
   decodeBinaryFrame,
   encodeBinaryFrame,
@@ -373,6 +378,35 @@ describe('server over a real socket', () => {
     expect(error.message).toContain(path.join(blocker, 'data', 'keys.json'));
     expect(error.message).not.toContain(secret);
     expect(error.message).not.toBe('internal error');
+  });
+
+  it('has every recognizer write down the speech check sentence, and refuses what is not speech', async () => {
+    const server = await start();
+    const post = (body: unknown) =>
+      fetch(`${server.http}/api/diagnostics/speech`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    const pcm = Buffer.from(new Int16Array(16_000 * 3).buffer).toString('base64');
+    const response = await post({ lang: 'de', pcm });
+    expect(response.status).toBe(200);
+    const report = (await response.json()) as SpeechCheckReport;
+    expect(report).toMatchObject({ lang: 'de', expected: SPEECH_CHECK_SENTENCES.de });
+    expect(report.results).toEqual([
+      expect.objectContaining({
+        id: 'mock-stt',
+        outcome: 'ok',
+        heard: expect.any(String),
+        accuracy: expect.any(Number),
+      }),
+    ]);
+
+    expect((await post({ lang: 'xx', pcm })).status).toBe(400);
+    expect((await post({ lang: 'de', pcm: Buffer.from([1, 2, 3]).toString('base64') })).status).toBe(400);
+    // Nine seconds is longer than the check ever needs.
+    const long = Buffer.alloc(16_000 * 2 * 9).toString('base64');
+    expect([400, 413]).toContain((await post({ lang: 'de', pcm: long })).status);
   });
 
   it('runs diagnostics against every provider', async () => {

@@ -6,7 +6,7 @@
  * - the UI only reads `AppState` and calls methods on `AppController`
  */
 
-import type { DiagnosticsReport, KeysResponse } from '../../../shared/api';
+import type { DiagnosticsReport, KeysResponse, SpeechCheckReport } from '../../../shared/api';
 import type { LangCode } from '../../../shared/languages';
 import type {
   DropReason,
@@ -276,6 +276,11 @@ export interface AppController {
   getKeys(): Promise<KeysResponse>;
   saveKeys(keys: Record<string, string | null>): Promise<KeysResponse>;
   runDiagnostics(): Promise<DiagnosticsReport>;
+  /**
+   * Have the app's voice say a known sentence in each language of the call, and every
+   * recognizer write it down: how well each one recognizes speech, word by word.
+   */
+  runSpeechCheck(): Promise<SpeechCheckReport[]>;
 
   dismissNotice(id: string): void;
 }

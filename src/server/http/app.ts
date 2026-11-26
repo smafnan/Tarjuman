@@ -7,13 +7,14 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 
 import {
   API,
+  SPEECH_CHECK_MAX_SECONDS,
   TTS_PROVIDER_HEADER,
   TTS_VOICE_HEADER,
   type ApiErrorBody,
   type KeysResponse,
 } from '../../shared/api';
 import { isLangCode } from '../../shared/languages';
-import { WS_PATH } from '../../shared/protocol';
+import { bytesToPcm16, UTTERANCE_SAMPLE_RATE, WS_PATH } from '../../shared/protocol';
 import { SPEECH_RATE_MAX, SPEECH_RATE_MIN } from '../../shared/settings';
 import { KeyValidationError } from '../keys';
 import { AbortedError, ChainExhaustedError, NoProviderError } from '../providers/chain';
@@ -143,6 +144,27 @@ export async function buildApp(services: Services, options: BuildAppOptions = {}
   });
 
   app.post(API.diagnostics, { preHandler: guard }, async () => services.diagnose());
+
+  // A few seconds of speech as base64 is larger than the usual request.
+  const speechCheckMaxBytes = SPEECH_CHECK_MAX_SECONDS * UTTERANCE_SAMPLE_RATE * 2;
+  app.post(
+    API.speechCheck,
+    { preHandler: guard, bodyLimit: Math.ceil((speechCheckMaxBytes * 4) / 3) + 1024 },
+    async (request, reply) => {
+      const body = (request.body ?? {}) as Record<string, unknown>;
+      if (!isLangCode(body.lang)) return sendError(reply, 400, 'bad_request', 'unknown language');
+      const bytes = typeof body.pcm === 'string' ? Buffer.from(body.pcm, 'base64') : Buffer.alloc(0);
+      if (bytes.length < 2 || bytes.length % 2 !== 0 || bytes.length > speechCheckMaxBytes) {
+        return sendError(
+          reply,
+          400,
+          'bad_request',
+          `pcm must be 16-bit samples, at most ${SPEECH_CHECK_MAX_SECONDS} s at ${UTTERANCE_SAMPLE_RATE} Hz`,
+        );
+      }
+      return services.checkSpeech(body.lang, bytesToPcm16(new Uint8Array(bytes)));
+    },
+  );
 
   app.post(API.tts, { preHandler: guard }, async (request, reply) => {
     const body = (request.body ?? {}) as Record<string, unknown>;

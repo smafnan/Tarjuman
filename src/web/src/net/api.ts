@@ -1,4 +1,5 @@
 import type { ApiErrorBody } from '../../../shared/api';
+import { pcm16ToBytes } from '../../../shared/protocol';
 
 /**
  * REST helpers. When the server was started with ACCESS_TOKEN, the token is handed to the
@@ -79,6 +80,16 @@ export async function apiSend<T>(method: 'POST' | 'PUT', path: string, body?: un
     body: JSON.stringify(body ?? {}),
   });
   return (await response.json()) as T;
+}
+
+/** 16-bit samples as base64 of their little-endian bytes, for a JSON body. */
+export function pcmToBase64(pcm: Int16Array): string {
+  const bytes = pcm16ToBytes(pcm);
+  let binary = '';
+  // In slices: spreading a whole recording into one call would overflow the stack.
+  for (let i = 0; i < bytes.length; i += 0x8000)
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
 }
 
 /** POST JSON, receive bytes (voice preview). */

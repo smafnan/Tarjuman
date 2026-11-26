@@ -10,7 +10,13 @@ import {
 } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 
-import type { DiagnosticsReport, KeysResponse, KeyStatus } from '../../../../shared/api';
+import type {
+  DiagnosticsReport,
+  KeysResponse,
+  KeyStatus,
+  SpeechCheckReport,
+  SpeechCheckResult,
+} from '../../../../shared/api';
 import { LANG_CODES, LANGUAGES, type LangCode } from '../../../../shared/languages';
 import {
   MAX_GLOSSARY_ENTRIES,
@@ -26,6 +32,7 @@ import { PROVIDER_KIND_LABEL } from '../lib/providers';
 import { nextTab } from '../lib/tabs';
 import { Segmented, SelectField, Slider, Spinner, Switch } from './controls';
 import { Dialog } from './Dialog';
+import { LangText } from './LangText';
 
 export type SettingsTab = 'keys' | 'languages' | 'audio' | 'appearance';
 
@@ -205,6 +212,92 @@ function Diagnostics() {
   );
 }
 
+/** How much of the sentence a recognizer must get right to count as good. */
+const GOOD_ACCURACY = 0.85;
+
+function speechVerdict(result: SpeechCheckResult) {
+  if (result.outcome === 'skipped') return { tone: 'skipped', icon: CircleMinus, label: 'Skipped' } as const;
+  if (result.outcome === 'failed') return { tone: 'failed', icon: CircleX, label: 'Failed' } as const;
+  const share = result.accuracy ?? 0;
+  const good = share >= GOOD_ACCURACY;
+  return {
+    tone: good ? 'ok' : 'warning',
+    icon: good ? CircleCheck : CircleAlert,
+    label: `${Math.round(share * 100)}% of words`,
+  } as const;
+}
+
+/** How well each recognizer writes down real speech: a known sentence per language of the call. */
+function SpeechCheck() {
+  const [reports, setReports] = useState<SpeechCheckReport[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const run = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      setReports(await controller().runSpeechCheck());
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="stack stack--tight">
+      <div className="row">
+        <button type="button" className="button" disabled={busy} onClick={() => void run()}>
+          {busy ? <Spinner /> : null} Test speech recognition
+        </button>
+        <span className="muted small">
+          Has the app&apos;s voice say one sentence in each language of the call, and shows how much of it
+          each speech recognizer wrote down correctly.
+        </span>
+      </div>
+      {error ? <p className="field__note field__note--danger">{error}</p> : null}
+      {reports?.map((report) => (
+        <table className="table" key={report.lang}>
+          <caption>
+            {LANGUAGES[report.lang].name}, said: <LangText lang={report.lang}>{report.expected}</LangText>
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Provider</th>
+              <th scope="col">Result</th>
+              <th scope="col">Time</th>
+              <th scope="col">Wrote down</th>
+            </tr>
+          </thead>
+          <tbody>
+            {report.results.map((result) => {
+              const verdict = speechVerdict(result);
+              const Icon = verdict.icon;
+              return (
+                <tr key={result.id}>
+                  <td>{result.label}</td>
+                  <td className={`outcome--${verdict.tone}`}>
+                    <Icon size={14} aria-hidden="true" /> {verdict.label}
+                  </td>
+                  <td>{result.outcome === 'skipped' ? '—' : `${result.ms} ms`}</td>
+                  <td>
+                    {result.outcome === 'ok' ? (
+                      <LangText lang={report.lang}>{result.heard || '(nothing)'}</LangText>
+                    ) : (
+                      result.detail
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      ))}
+    </div>
+  );
+}
+
 function KeysTab() {
   const [keys, setKeys] = useState<KeysResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -253,6 +346,7 @@ function KeysTab() {
         <KeyCard key={status.name} status={status} writable={keys.writable} onSaved={setKeys} />
       ))}
       <Diagnostics />
+      <SpeechCheck />
     </div>
   );
 }

@@ -48,7 +48,7 @@ on macOS and Linux). Keys can also simply be pasted in the app, as in step 1.
    and a [Google AI Studio key](https://aistudio.google.com/apikey). Neither needs a credit
    card. At least one of the two is needed to understand speech: Gemini alone is enough
    and gives the best Urdu accuracy; Groq adds fast German and English recognition and a
-   fallback. Press **Test providers**.
+   fallback. Press **Test providers**, then **Test speech recognition**.
 2. **Try it without Teams.** Put on headphones, or switch off "I am using headphones"
    under Settings → Audio first: that setting is on by default, and with loudspeakers the
    microphone would hear the translation and translate it again. Then press **Start

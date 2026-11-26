@@ -67,6 +67,12 @@ test('settings: keys, diagnostics and language pair', async ({ page }) => {
   await expect(dialog.getByRole('cell', { name: 'OK', exact: true })).toHaveCount(2);
   await expect(dialog.getByRole('cell', { name: 'Connected', exact: true })).toHaveCount(1);
 
+  // The real speech test: the fake voice says the sentence of each language of the call, the
+  // browser decodes it, and the fake recognizer's answer is scored (it writes something else).
+  await dialog.getByRole('button', { name: 'Test speech recognition' }).click();
+  await expect(dialog.getByRole('cell', { name: /% of words$/ })).toHaveCount(2);
+  await expect(dialog.getByText('Guten Morgen, können Sie mich gut hören?')).toBeVisible();
+
   await dialog.getByRole('tab', { name: 'Languages & style' }).click();
   // Typing with spaces must survive (the stored copy is trimmed on every keystroke).
   await dialog.getByLabel('Meeting context').pressSequentially('weekly planning call');

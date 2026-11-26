@@ -1,5 +1,5 @@
 import pkg from '../../package.json';
-import type { DiagnosticResult, DiagnosticsReport } from '../shared/api';
+import type { DiagnosticResult, DiagnosticsReport, SpeechCheckReport } from '../shared/api';
 import type { LangCode } from '../shared/languages';
 import {
   PROTOCOL_VERSION,
@@ -22,6 +22,7 @@ import { GroqWhisperProvider } from './providers/stt/groqWhisper';
 import { AzureTtsProvider } from './providers/tts/azure';
 import { EdgeTtsProvider } from './providers/tts/edge';
 import type { AnyProvider, MtProvider, ProviderBase, SttProvider, TtsProvider } from './providers/types';
+import { checkRecognition, notSetUpReason } from './speechCheck';
 
 /**
  * Composition root: the one place that knows which concrete providers exist, in which
@@ -253,6 +254,8 @@ export interface Services {
   onStatusChange(listener: () => void): () => void;
   /** Send one small real request to every configured provider and report what came back. */
   diagnose(): Promise<DiagnosticsReport>;
+  /** Have every recognizer write down `pcm`, the speech check's sentence in `lang` (see speechCheck.ts). */
+  checkSpeech(lang: LangCode, pcm: Int16Array): Promise<SpeechCheckReport>;
 }
 
 /** A short burst of harmonics: enough for a recognizer to accept the request, without real speech. */
@@ -292,8 +295,7 @@ async function probe(provider: AnyProvider): Promise<DiagnosticResult> {
       ...base,
       outcome: 'skipped',
       ms: 0,
-      detail:
-        provider.unconfiguredReason?.() ?? (provider.requiresKey ? 'API key not set' : 'not configured'),
+      detail: notSetUpReason(provider),
     };
   }
   const signal = AbortSignal.timeout(DIAGNOSTIC_TIMEOUT_MS);
@@ -458,5 +460,6 @@ export async function createServices(
       })();
       return diagnosing;
     },
+    checkSpeech: (lang, pcm) => checkRecognition(stt.providers, lang, pcm),
   };
 }

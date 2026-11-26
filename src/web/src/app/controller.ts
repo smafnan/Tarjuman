@@ -1,4 +1,12 @@
-import { API, type DiagnosticsReport, type KeysResponse } from '../../../shared/api';
+import {
+  API,
+  SPEECH_CHECK_MAX_SECONDS,
+  SPEECH_CHECK_SENTENCES,
+  type DiagnosticsReport,
+  type KeysResponse,
+  type SpeechCheckReport,
+  type SpeechCheckRequest,
+} from '../../../shared/api';
 import { LANGUAGES, type LangCode } from '../../../shared/languages';
 import {
   floatToPcm16,
@@ -11,6 +19,7 @@ import {
 import type { ChannelId } from '../../../shared/settings';
 import { cancelBrowserSpeech, primeBrowserVoices, speakWithBrowser } from '../audio/browserTts';
 import { CaptureChannel } from '../audio/capture';
+import { decodeToMono } from '../audio/decode';
 import { findDevice, listDevices } from '../audio/devices';
 import { OutputBus } from '../audio/output';
 import { segmenterOptions, type Segment } from '../audio/segmenter';
@@ -23,7 +32,7 @@ import {
   type OpenedSource,
   type SourceKind,
 } from '../audio/sources';
-import { ApiError, apiBytes, apiGet, apiSend, getAccessToken } from '../net/api';
+import { ApiError, apiBytes, apiGet, apiSend, getAccessToken, pcmToBase64 } from '../net/api';
 import { ServerConnection } from '../net/connection';
 import {
   addEntry,
@@ -953,6 +962,31 @@ class Controller implements AppController {
       return await apiSend<DiagnosticsReport>('POST', API.diagnostics);
     } catch (error) {
       if (error instanceof ApiError) pushNotice('error', `The provider test could not run: ${error.message}`);
+      throw error;
+    }
+  }
+
+  async runSpeechCheck(): Promise<SpeechCheckReport[]> {
+    const { outgoing, incoming } = this.settings.session.channels;
+    try {
+      const reports: SpeechCheckReport[] = [];
+      // The two languages of the call, one after the other: the recognizers share rate limits.
+      for (const lang of new Set([outgoing.sourceLang, incoming.sourceLang])) {
+        const spoken = await apiBytes(API.tts, {
+          text: SPEECH_CHECK_SENTENCES[lang],
+          lang,
+          voice: 'auto',
+          rate: 1,
+        });
+        // The server cannot decode the voice's compressed audio; the browser can.
+        const samples = await decodeToMono(spoken, UTTERANCE_SAMPLE_RATE);
+        const pcm = floatToPcm16(samples.subarray(0, SPEECH_CHECK_MAX_SECONDS * UTTERANCE_SAMPLE_RATE));
+        const request: SpeechCheckRequest = { lang, pcm: pcmToBase64(pcm) };
+        reports.push(await apiSend<SpeechCheckReport>('POST', API.speechCheck, request));
+      }
+      return reports;
+    } catch (error) {
+      pushNotice('error', `The speech recognition test could not run: ${errorMessage(error)}`);
       throw error;
     }
   }

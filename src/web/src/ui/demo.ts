@@ -1,4 +1,9 @@
-import type { DiagnosticsReport, KeysResponse } from '../../../shared/api';
+import {
+  SPEECH_CHECK_SENTENCES,
+  type DiagnosticsReport,
+  type KeysResponse,
+  type SpeechCheckReport,
+} from '../../../shared/api';
 import type { ProviderStatus, ServerInfo } from '../../../shared/protocol';
 import {
   clearTranscript,
@@ -247,6 +252,57 @@ export function replaySample() {
   });
 }
 
+const SPEECH_CHECK: SpeechCheckReport[] = [
+  {
+    lang: 'ur',
+    expected: SPEECH_CHECK_SENTENCES.ur,
+    results: [
+      {
+        id: 'gemini-audio',
+        label: 'Google · gemini-3.5-flash-lite (audio)',
+        outcome: 'ok',
+        ms: 1_204,
+        heard: 'صبح بخیر، کیا آپ مجھے اچھی طرح سن سکتے ہیں؟',
+        accuracy: 1,
+        detail: '',
+      },
+      {
+        id: 'groq-whisper-large-v3',
+        label: 'Groq · whisper-large-v3',
+        outcome: 'ok',
+        ms: 512,
+        heard: 'صبح بخیر کیا آپ مجھے اچھی طرح سنتے ہیں',
+        accuracy: 0.8,
+        detail: '',
+      },
+    ],
+  },
+  {
+    lang: 'de',
+    expected: SPEECH_CHECK_SENTENCES.de,
+    results: [
+      {
+        id: 'gemini-audio',
+        label: 'Google · gemini-3.5-flash-lite (audio)',
+        outcome: 'ok',
+        ms: 988,
+        heard: 'Guten Morgen, können Sie mich gut hören?',
+        accuracy: 1,
+        detail: '',
+      },
+      {
+        id: 'groq-whisper-large-v3',
+        label: 'Groq · whisper-large-v3',
+        outcome: 'ok',
+        ms: 446,
+        heard: 'Guten Morgen, können Sie mich gut hören?',
+        accuracy: 1,
+        detail: '',
+      },
+    ],
+  },
+];
+
 const KEYS: KeysResponse = {
   writable: true,
   problems: [],
@@ -373,6 +429,7 @@ function standIn(): AppController {
     getKeys: async () => KEYS,
     saveKeys: async () => KEYS,
     runDiagnostics: async () => DIAGNOSTICS,
+    runSpeechCheck: async () => SPEECH_CHECK,
     dismissNotice,
   };
 }
